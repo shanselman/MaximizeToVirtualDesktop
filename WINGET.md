@@ -74,7 +74,7 @@ Installers:
     InstallerUrl: https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.2/MaximizeToVirtualDesktop-v0.0.2-win-arm64.zip
     InstallerSha256: [auto-generated]
 ManifestType: singleton
-ManifestVersion: 1.0.0
+ManifestVersion: 1.6.0
 ```
 
 **Note**: WingetCreate automatically calculates SHA256 hashes for you.
