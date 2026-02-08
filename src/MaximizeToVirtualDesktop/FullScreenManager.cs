@@ -210,6 +210,8 @@ internal sealed class FullScreenManager
         NativeMethods.SetForegroundWindow(hwnd);
 
         // 8. Track all windows
+        // Note: All windows share the same tempDesktop COM reference.
+        // When restoring/destroying, we only release the COM reference once per desktop.
         foreach (var window in movedWindows)
         {
             var placement = windowPlacements.ContainsKey(window) 
@@ -290,7 +292,8 @@ internal sealed class FullScreenManager
             if (origDesktop != null) Marshal.ReleaseComObject(origDesktop);
         }
 
-        // Remove temp desktop and release its COM reference (only once)
+        // Remove temp desktop and release its COM reference (only once for all windows)
+        // All related windows share the same TempDesktop COM reference, so we only release it once
         _vds.RemoveDesktop(entry.TempDesktop);
         Marshal.ReleaseComObject(entry.TempDesktop);
 
@@ -343,7 +346,7 @@ internal sealed class FullScreenManager
             if (origDesktop != null) Marshal.ReleaseComObject(origDesktop);
         }
 
-        // Then remove the temp desktop and release its COM reference
+        // Remove the temp desktop and release its COM reference (only once, now that it's the last window)
         _vds.RemoveDesktop(entry.TempDesktop);
         Marshal.ReleaseComObject(entry.TempDesktop);
     }
@@ -425,6 +428,10 @@ internal sealed class FullScreenManager
     /// - Visible
     /// - Not owned by another window (not dialogs/popups)
     /// - Belong to the same process
+    /// - Have a window title (filters out background/helper windows)
+    /// 
+    /// This is used to find sibling windows (e.g., VS Code detached tabs) that should
+    /// be moved together to the virtual desktop.
     /// </summary>
     private List<IntPtr> GetAllProcessWindows(IntPtr hwnd)
     {
@@ -446,7 +453,10 @@ internal sealed class FullScreenManager
             if (enumPid != targetPid)
                 return true;
 
-            // Skip if no title (likely not a top-level application window)
+            // Skip if no title - this filters out background/helper windows.
+            // Top-level application windows (main windows, detached tabs) have titles.
+            // Note: This may miss windows that are temporarily title-less during initialization,
+            // but that's acceptable for this use case.
             int textLength = NativeMethods.GetWindowTextLength(enumHwnd);
             if (textLength == 0)
                 return true;
