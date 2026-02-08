@@ -22,7 +22,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v5
       with:
-        dotnet-version: '8.0.x'
+        dotnet-version: '10.0.x'
         
     - name: Restore dependencies
       run: dotnet restore src/MaximizeToVirtualDesktop/MaximizeToVirtualDesktop.csproj
@@ -91,7 +91,7 @@ jobs:
         endpoint: https://wus2.codesigning.azure.net/
         trusted-signing-account-name: hanselman
         certificate-profile-name: WindowsEdgeLight
-        files-folder: ${{ github.workspace }}\src\MaximizeToVirtualDesktop\bin\Release\net8.0-windows
+        files-folder: ${{ github.workspace }}\src\MaximizeToVirtualDesktop\bin\Release\net10.0-windows
         files-folder-filter: exe
         files-folder-recurse: true
         file-digest: SHA256
@@ -105,12 +105,12 @@ jobs:
         $version = $env:VERSION
         
         New-Item -ItemType Directory -Path "temp-x64" -Force
-        Copy-Item "src/MaximizeToVirtualDesktop/bin/Release/net8.0-windows/win-x64/publish/MaximizeToVirtualDesktop.exe" -Destination "temp-x64/"
+        Copy-Item "src/MaximizeToVirtualDesktop/bin/Release/net10.0-windows/win-x64/publish/MaximizeToVirtualDesktop.exe" -Destination "temp-x64/"
         Copy-Item "README.md" -Destination "temp-x64/"
         Compress-Archive -Path "temp-x64/*" -DestinationPath "artifacts/MaximizeToVirtualDesktop-v$version-win-x64.zip"
         
         New-Item -ItemType Directory -Path "temp-arm64" -Force
-        Copy-Item "src/MaximizeToVirtualDesktop/bin/Release/net8.0-windows/win-arm64/publish/MaximizeToVirtualDesktop.exe" -Destination "temp-arm64/"
+        Copy-Item "src/MaximizeToVirtualDesktop/bin/Release/net10.0-windows/win-arm64/publish/MaximizeToVirtualDesktop.exe" -Destination "temp-arm64/"
         Copy-Item "README.md" -Destination "temp-arm64/"
         Compress-Archive -Path "temp-arm64/*" -DestinationPath "artifacts/MaximizeToVirtualDesktop-v$version-win-arm64.zip"
         

@@ -80,12 +80,15 @@ internal sealed class FullScreenManager
             return;
         }
 
-        // 3. Name it after the process
+        // 3. Name the desktop after the window title (or process name as fallback)
         try
         {
             NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
             var process = Process.GetProcessById(processId);
-            _vds.SetDesktopName(tempDesktop, process.ProcessName);
+            var name = !string.IsNullOrWhiteSpace(process.MainWindowTitle)
+                ? process.MainWindowTitle
+                : process.ProcessName;
+            _vds.SetDesktopName(tempDesktop, name);
         }
         catch
         {
