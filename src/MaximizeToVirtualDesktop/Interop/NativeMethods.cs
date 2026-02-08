@@ -64,9 +64,6 @@ internal static partial class NativeMethods
     internal const uint GW_OWNER = 4;
 
     [DllImport("user32.dll")]
-    internal static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
-
-    [DllImport("user32.dll")]
     internal static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll")]

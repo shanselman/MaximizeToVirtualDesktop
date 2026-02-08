@@ -13,6 +13,9 @@ internal sealed class FullScreenManager
     private readonly VirtualDesktopService _vds;
     private readonly FullScreenTracker _tracker;
     private readonly HashSet<IntPtr> _inFlight = new();
+    // Track temp desktop COM refs that have already been released to prevent double-release.
+    // Multiple tracked windows may share the same TempDesktop COM pointer.
+    private readonly HashSet<Guid> _releasedDesktops = new();
 
     public FullScreenManager(VirtualDesktopService vds, FullScreenTracker tracker)
     {
@@ -293,9 +296,11 @@ internal sealed class FullScreenManager
         }
 
         // Remove temp desktop and release its COM reference (only once for all windows)
-        // All related windows share the same TempDesktop COM reference, so we only release it once
-        _vds.RemoveDesktop(entry.TempDesktop);
-        Marshal.ReleaseComObject(entry.TempDesktop);
+        if (_releasedDesktops.Add(entry.TempDesktopId))
+        {
+            _vds.RemoveDesktop(entry.TempDesktop);
+            Marshal.ReleaseComObject(entry.TempDesktop);
+        }
 
         // Set focus on the primary restored window
         if (NativeMethods.IsWindow(hwnd))
@@ -347,8 +352,11 @@ internal sealed class FullScreenManager
         }
 
         // Remove the temp desktop and release its COM reference (only once, now that it's the last window)
-        _vds.RemoveDesktop(entry.TempDesktop);
-        Marshal.ReleaseComObject(entry.TempDesktop);
+        if (_releasedDesktops.Add(entry.TempDesktopId))
+        {
+            _vds.RemoveDesktop(entry.TempDesktop);
+            Marshal.ReleaseComObject(entry.TempDesktop);
+        }
     }
 
     /// <summary>
@@ -459,6 +467,10 @@ internal sealed class FullScreenManager
             // but that's acceptable for this use case.
             int textLength = NativeMethods.GetWindowTextLength(enumHwnd);
             if (textLength == 0)
+                return true;
+
+            // Skip windows already tracked on another virtual desktop
+            if (_tracker.IsTracked(enumHwnd))
                 return true;
 
             windows.Add(enumHwnd);
