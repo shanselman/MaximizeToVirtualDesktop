@@ -269,14 +269,6 @@ internal sealed class TrayApplication : Form
         });
         menu.Items.Add(restoreAllItem);
 
-        var pinItem = new ToolStripMenuItem("Pin/Unpin to All Desktops", null, (_, _) =>
-        {
-            var hwnd = NativeMethods.GetForegroundWindow();
-            if (hwnd != IntPtr.Zero && hwnd != Handle)
-                _manager.PinToggle(hwnd);
-        });
-        menu.Items.Add(pinItem);
-
         menu.Items.Add(new ToolStripSeparator());
 
         var howToUseItem = new ToolStripMenuItem("How to Use", null, (_, _) =>
@@ -385,21 +377,84 @@ internal sealed class TrayApplication : Form
 
     private static void ShowUsageInfo()
     {
-        MessageBox.Show(
-            "Maximize to Virtual Desktop\n\n" +
-            "Maximize a window to its own virtual desktop:\n\n" +
-            "  • Hotkey: Ctrl+Alt+Shift+X\n" +
-            "    Toggles the active window to/from a virtual desktop.\n\n" +
-            "  • Shift+Click the maximize button\n" +
-            "    Hold Shift and click any window's maximize button.\n\n" +
-            "Pin a window to all virtual desktops:\n\n" +
-            "  • Hotkey: Ctrl+Alt+Shift+P\n" +
-            "    Toggles pin/unpin on the active window.\n\n" +
-            "The window is moved to a new virtual desktop and maximized.\n" +
-            "Close or restore the window to return to your original desktop.\n\n" +
-            "Use \"Restore All\" in the tray menu to bring everything back.",
-            "How to Use — Maximize to Virtual Desktop",
-            MessageBoxButtons.OK, MessageBoxIcon.Information);
+        using var form = new Form
+        {
+            Text = "How to Use — Maximize to Virtual Desktop",
+            Size = new Size(620, 580),
+            StartPosition = FormStartPosition.CenterScreen,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath),
+        };
+
+        var rtb = new RichTextBox
+        {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            BorderStyle = BorderStyle.None,
+            BackColor = SystemColors.Window,
+        };
+
+        // Add inner padding via a wrapper panel
+        var contentPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(20, 16, 20, 0),
+        };
+        contentPanel.Controls.Add(rtb);
+
+        // Build RTF content
+        rtb.SelectionFont = new Font("Segoe UI Variable Display", 14f, FontStyle.Bold);
+        rtb.AppendText("Maximize to Virtual Desktop\n\n");
+
+        AppendSection(rtb, "Maximize a Window to Its Own Desktop",
+            ("Ctrl + Alt + Shift + X", "Toggles the focused window to/from its own virtual desktop."),
+            ("Shift + Click maximize button", "Hold Shift and click any window's maximize button."));
+
+        AppendSection(rtb, "Pin a Window to All Desktops",
+            ("Ctrl + Alt + Shift + P", "Toggles pin/unpin so the focused window appears on every desktop."));
+
+        AppendSection(rtb, "How It Works",
+            ("Maximize", "The window moves to a new virtual desktop and is maximized full-screen."),
+            ("Restore", "Close or restore the window to automatically return to your original desktop."),
+            ("Restore All", "Use the tray menu to bring all windows back at once."));
+
+        var panel = new Panel { Dock = DockStyle.Bottom, Height = 50 };
+        var okButton = new Button
+        {
+            Text = "OK",
+            DialogResult = DialogResult.OK,
+            Size = new Size(90, 32),
+            FlatStyle = FlatStyle.System,
+        };
+        okButton.Location = new Point((panel.Width - okButton.Width) / 2, 9);
+        panel.Resize += (_, _) => okButton.Location = new Point((panel.Width - okButton.Width) / 2, 9);
+        panel.Controls.Add(okButton);
+
+        form.AcceptButton = okButton;
+        form.Controls.Add(contentPanel);
+        form.Controls.Add(panel);
+        form.ShowDialog();
+    }
+
+    private static void AppendSection(RichTextBox rtb, string heading, params (string key, string desc)[] items)
+    {
+        rtb.SelectionFont = new Font("Segoe UI Variable Display", 10.5f, FontStyle.Bold);
+        rtb.AppendText(heading + "\n");
+
+        foreach (var (key, desc) in items)
+        {
+            rtb.SelectionFont = new Font("Segoe UI Variable Display", 9.5f, FontStyle.Regular);
+            rtb.AppendText("  ");
+            rtb.SelectionFont = new Font("Consolas", 9f, FontStyle.Bold);
+            rtb.AppendText(key);
+            rtb.SelectionFont = new Font("Segoe UI Variable Display", 9.5f, FontStyle.Regular);
+            rtb.AppendText("  —  " + desc + "\n");
+        }
+
+        rtb.AppendText("\n");
     }
 
     private static int GetWindowsBuildNumber()
