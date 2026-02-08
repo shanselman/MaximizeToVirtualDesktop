@@ -4,6 +4,8 @@ Bring macOS's green-button "maximize to full-screen virtual desktop" behavior to
 
 When triggered, the foreground window is moved to a brand-new virtual desktop and maximized. Closing, un-maximizing, or toggling the hotkey again restores everything — the window returns to its original desktop and size, and the temporary desktop is removed.
 
+![MaximizeToVirtualDesktop demo](img/maximizetovd_compressed.gif)
+
 ## Usage
 
 | Trigger | How |
