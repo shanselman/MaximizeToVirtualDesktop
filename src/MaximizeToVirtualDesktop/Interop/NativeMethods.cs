@@ -242,13 +242,4 @@ internal static partial class NativeMethods
 
     internal const uint SW_SHOWNORMAL = 1;
     internal const uint SW_SHOWMAXIMIZED = 3;
-
-    // --- WinRT HString ---
-
-    [DllImport("api-ms-win-core-winrt-string-l1-1-0.dll", CallingConvention = CallingConvention.StdCall)]
-    internal static extern int WindowsCreateString(
-        [MarshalAs(UnmanagedType.LPWStr)] string sourceString, int length, out IntPtr hstring);
-
-    [DllImport("api-ms-win-core-winrt-string-l1-1-0.dll", CallingConvention = CallingConvention.StdCall)]
-    internal static extern int WindowsDeleteString(IntPtr hstring);
 }

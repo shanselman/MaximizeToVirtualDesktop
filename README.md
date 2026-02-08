@@ -29,10 +29,10 @@ The app runs in the system tray. Right-click the tray icon for options:
 
 ## Requirements
 
-- **Windows 11** (any version — 21H2 through 24H2+)
+- **Windows 10** (build 19041/20H1 or later) or **Windows 11** (any version)
 - Self-contained — no .NET installation required
 
-The app auto-detects your Windows build and selects the correct COM vtable layout. If a future Windows update breaks things, the app enters degraded mode and checks for updates automatically.
+The app uses the [Slions.VirtualDesktop](https://github.com/Jack251970/VirtualDesktop) library, which auto-detects your Windows build and selects the correct COM interface GUIDs and vtable layouts at runtime. If a future Windows update breaks things, the app enters degraded mode and checks for updates automatically.
 
 ### Shift+Click Compatibility
 
@@ -68,22 +68,26 @@ src/MaximizeToVirtualDesktop/
 ├── TrayApplication.cs          System tray, hotkey, lifecycle owner
 ├── FullScreenManager.cs        Orchestrator with rollback on every step
 ├── FullScreenTracker.cs        Thread-safe hwnd → tracking state map
-├── VirtualDesktopService.cs    COM wrapper, 4 operations, Explorer restart recovery
+├── VirtualDesktopService.cs    Wrapper over Slions.VirtualDesktop library
 ├── WindowMonitor.cs            SetWinEventHook for close/un-maximize detection
 ├── MaximizeButtonHook.cs       WH_MOUSE_LL for Shift+Click on maximize button
 ├── TrackerPersistence.cs       JSON crash recovery in %LOCALAPPDATA%
 └── Interop/
-    ├── NativeMethods.cs        P/Invoke declarations
-    ├── VirtualDesktopCom.cs    Vendored COM interfaces (from MScholtes/VirtualDesktop)
-    └── DesktopManagerAdapter.cs Multi-version COM vtable adapter
+    └── NativeMethods.cs        P/Invoke declarations
 ```
 
-**Zero NuGet dependencies.** COM interop declarations are vendored from [MScholtes/VirtualDesktop](https://github.com/MScholtes/VirtualDesktop) (MIT license, actively maintained). The app ships two vtable layouts (pre-24H2 and 24H2+) and auto-selects the correct one with a smoke test fallback.
+Virtual desktop COM interop is handled by the [Slions.VirtualDesktop](https://github.com/Jack251970/VirtualDesktop) NuGet package (forked from [Grabacr07/VirtualDesktop](https://github.com/Grabacr07/VirtualDesktop), MIT license). This library solves the "moving APIs" problem by:
+
+1. **Data-driven GUIDs** — COM interface GUIDs for each Windows build are stored in `app.config`, not hardcoded in C# interface declarations.
+2. **Runtime compilation** — at first launch, the library uses Roslyn to compile a version-specific interop DLL matching your Windows build, then caches it on disk.
+3. **Registry fallback** — if GUIDs aren't in the config for your exact build, it looks them up in the Windows Registry.
+
+This eliminates the need to manually update vendored COM declarations when Windows updates change the undocumented interface GUIDs.
 
 ## Design Principles
 
 1. **Reliable over featureful** — every code path handles failure. No crashes, no orphaned desktops, no stuck windows. If something goes wrong, roll back to the state before we touched anything.
-2. **Tight** — one project, zero packages, 9 files. Each file has one job.
+2. **Tight** — one project, minimal packages, 8 files. Each file has one job.
 3. **Clean** — `IDisposable` on every native resource. No fire-and-forget. All WinEvent callbacks marshal to the UI thread.
 
 ## Known Limitations
@@ -97,24 +101,16 @@ Microsoft's Virtual Desktop feature has a proper, documented COM interface — `
 
 The problem? **Microsoft changes the interface GUIDs with nearly every major Windows update.** Not the methods. Not the signatures. Just the GUIDs. This means every app that uses virtual desktop automation — this one, [Peach](https://peachapp.net), [FancyWM](https://github.com/FancyWM/fancywm), and dozens of others — breaks silently 2-3 times a year and has to scramble to update hardcoded GUIDs.
 
-This is the single biggest fragility in this app. When it breaks, the app shows an error dialog on startup saying "Failed to initialize Virtual Desktop COM interface." The fix is straightforward but shouldn't be necessary:
+### How this app handles it
 
-### How to update the GUIDs
+This app uses the [Slions.VirtualDesktop](https://github.com/Jack251970/VirtualDesktop) library (forked from Grabacr07/VirtualDesktop) which solves the moving GUIDs problem through:
 
-1. Check [MScholtes/VirtualDesktop](https://github.com/MScholtes/VirtualDesktop) — Markus Scholtes maintains per-build interface files (e.g., `VirtualDesktop11-24H2.cs`) and typically updates within days of a new Windows build. Huge thanks to him for doing this thankless work for the entire community.
-2. If it's a **vtable change** (new/removed methods, same GUIDs), add a new adapter class in `DesktopManagerAdapter.cs` and a new COM interface in `VirtualDesktopCom.cs`.
-3. If it's a **GUID change**, update the GUIDs on the affected interfaces.
-4. The fragile GUIDs are on these interfaces:
+1. **Data-driven GUID database** — GUIDs for every known Windows build are stored in `app.config`, keyed by build number. The library ships with GUIDs for Windows 10 (17134+) through Windows 11 24H2+.
+2. **Runtime compilation** — at first launch, Roslyn compiles a version-specific interop DLL with the correct GUIDs for your exact Windows build. This DLL is cached on disk for subsequent launches.
+3. **Registry fallback** — if your build isn't in the database, the library can discover GUIDs from the Windows Registry (`HKCR\Interface`).
+4. **Community-maintained** — when a new Windows build ships, the community updates the `app.config` and publishes a new NuGet version. This is the same update cadence as before, but the fix is a simple NuGet version bump instead of reverse-engineering vtable layouts.
 
-| Interface | What it does | Stable? |
-|-----------|-------------|---------|
-| `IVirtualDesktopManager` | Check/move owned windows | ✅ Documented, stable since Win10 |
-| `IServiceProvider10` | Standard COM service lookup | ✅ Stable |
-| `IObjectArray` | Standard COM collection | ✅ Stable |
-| `IVirtualDesktop` | Desktop identity, name, wallpaper | ⚠️ **Breaks with Windows updates** |
-| `IVirtualDesktopManagerInternal` | Create, switch, move, remove desktops | ⚠️ **Breaks with Windows updates** |
-| `IApplicationView` | Window view for cross-process moves | ⚠️ **Breaks with Windows updates** |
-| `IApplicationViewCollection` | Get views by window handle | ⚠️ **Breaks with Windows updates** |
+Previously, this app vendored COM interface declarations from [MScholtes/VirtualDesktop](https://github.com/MScholtes/VirtualDesktop) and maintained two vtable layouts (pre-24H2 and 24H2+) with a runtime smoke test. The library approach is more maintainable and supports a broader range of Windows builds out of the box.
 
 ### Dear Microsoft
 
@@ -122,7 +118,8 @@ Please stabilize the Virtual Desktop COM interfaces or provide a proper public A
 
 ## Prior Art & Credits
 
-- **[Markus Scholtes (MScholtes/VirtualDesktop)](https://github.com/MScholtes/VirtualDesktop)** — the COM interface definitions we vendor are from his project (MIT license). He does the hard work of reverse-engineering and publishing updated GUIDs for every Windows build. This app and many others wouldn't be possible without his work.
+- **[Jack251970/VirtualDesktop (Slions.VirtualDesktop)](https://github.com/Jack251970/VirtualDesktop)** — the library we use for virtual desktop COM interop. Forked from Grabacr07/VirtualDesktop, it handles version-specific COM GUIDs automatically via runtime compilation. MIT license.
+- **[Markus Scholtes (MScholtes/VirtualDesktop)](https://github.com/MScholtes/VirtualDesktop)** — does the hard work of reverse-engineering and publishing updated GUIDs for every Windows build. The previous version of this app vendored his COM interface definitions.
 - [Peach](https://peachapp.net) — MS Store app with similar hotkey UX
 - PowerToys feature requests [#13993](https://github.com/microsoft/PowerToys/issues/13993), [#21597](https://github.com/microsoft/PowerToys/issues/21597)
 

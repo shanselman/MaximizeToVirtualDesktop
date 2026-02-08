@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using MaximizeToVirtualDesktop.Interop;
+using WindowsDesktop;
 
 namespace MaximizeToVirtualDesktop;
 
@@ -116,7 +116,6 @@ internal sealed class FullScreenManager
         {
             Trace.WriteLine("FullScreenManager: Failed to move window, rolling back desktop creation.");
             _vds.RemoveDesktop(tempDesktop);
-            Marshal.ReleaseComObject(tempDesktop);
             return;
         }
 
@@ -126,16 +125,8 @@ internal sealed class FullScreenManager
             // Rollback: move window back, remove desktop
             Trace.WriteLine("FullScreenManager: Failed to switch desktop, rolling back.");
             var origDesktop = _vds.FindDesktop(originalDesktopId.Value);
-            try
-            {
-                if (origDesktop != null) _vds.MoveWindowToDesktop(hwnd, origDesktop);
-            }
-            finally
-            {
-                if (origDesktop != null) Marshal.ReleaseComObject(origDesktop);
-            }
+            if (origDesktop != null) _vds.MoveWindowToDesktop(hwnd, origDesktop);
             _vds.RemoveDesktop(tempDesktop);
-            Marshal.ReleaseComObject(tempDesktop);
             return;
         }
 
@@ -188,26 +179,18 @@ internal sealed class FullScreenManager
 
         // 2. Move window back to original desktop and switch back
         var origDesktop = _vds.FindDesktop(entry.OriginalDesktopId);
-        try
+        if (origDesktop != null)
         {
-            if (origDesktop != null)
-            {
-                if (windowStillExists) _vds.MoveWindowToDesktop(hwnd, origDesktop);
-                _vds.SwitchToDesktop(origDesktop);
-            }
-            else
-            {
-                Trace.WriteLine("FullScreenManager: Original desktop no longer exists, leaving window on current.");
-            }
+            if (windowStillExists) _vds.MoveWindowToDesktop(hwnd, origDesktop);
+            _vds.SwitchToDesktop(origDesktop);
         }
-        finally
+        else
         {
-            if (origDesktop != null) Marshal.ReleaseComObject(origDesktop);
+            Trace.WriteLine("FullScreenManager: Original desktop no longer exists, leaving window on current.");
         }
 
-        // 3. Remove temp desktop and release its COM reference
+        // 3. Remove temp desktop
         _vds.RemoveDesktop(entry.TempDesktop);
-        Marshal.ReleaseComObject(entry.TempDesktop);
 
         // 4. Set focus on the restored window
         if (windowStillExists)
@@ -231,18 +214,10 @@ internal sealed class FullScreenManager
 
         // Switch back to original desktop first
         var origDesktop = _vds.FindDesktop(entry.OriginalDesktopId);
-        try
-        {
-            if (origDesktop != null) _vds.SwitchToDesktop(origDesktop);
-        }
-        finally
-        {
-            if (origDesktop != null) Marshal.ReleaseComObject(origDesktop);
-        }
+        if (origDesktop != null) _vds.SwitchToDesktop(origDesktop);
 
-        // Then remove the temp desktop and release its COM reference
+        // Then remove the temp desktop
         _vds.RemoveDesktop(entry.TempDesktop);
-        Marshal.ReleaseComObject(entry.TempDesktop);
     }
 
     /// <summary>

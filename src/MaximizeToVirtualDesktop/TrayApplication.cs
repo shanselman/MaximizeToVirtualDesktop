@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using MaximizeToVirtualDesktop.Interop;
 using Updatum;
 
@@ -69,21 +68,22 @@ internal sealed class TrayApplication : Form
         var buildNumber = GetWindowsBuildNumber();
         Trace.WriteLine($"TrayApplication: Windows build {buildNumber}");
 
-        if (buildNumber < 22000)
+        if (buildNumber < 19041)
         {
-            // Not Windows 11 at all
+            // Below minimum supported Windows 10 build
             MessageBox.Show(
-                "MaximizeToVirtualDesktop requires Windows 11.\n\n" +
+                "MaximizeToVirtualDesktop requires Windows 10 20H1 or later.\n\n" +
                 $"Your system is running Windows build {buildNumber}.\n" +
-                "Virtual Desktop APIs needed by this app are not available on Windows 10.",
+                "Virtual Desktop APIs needed by this app are not available.",
                 "MaximizeToVirtualDesktop — Unsupported Windows Version",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             Application.Exit();
             return;
         }
 
-        // Initialize COM (adapter auto-selects based on build number)
-        _comInitialized = _vds.Initialize(buildNumber);
+        // Initialize via the VirtualDesktop library (auto-detects Windows build
+        // and selects correct COM interface GUIDs and vtable layouts)
+        _comInitialized = _vds.Initialize();
         if (!_comInitialized)
         {
             Trace.WriteLine("TrayApplication: COM initialization failed — entering degraded mode.");
@@ -430,7 +430,6 @@ internal sealed class TrayApplication : Form
             {
                 Trace.WriteLine($"TrayApplication: Removing orphaned desktop {entry.TempDesktopId} ({entry.ProcessName ?? "unknown"})");
                 _vds.RemoveDesktop(desktop);
-                Marshal.ReleaseComObject(desktop);
             }
         }
 

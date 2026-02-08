@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using MaximizeToVirtualDesktop.Interop;
+using WindowsDesktop;
 
 namespace MaximizeToVirtualDesktop;
 
@@ -8,7 +8,7 @@ internal sealed record TrackingEntry(
     IntPtr Hwnd,
     Guid OriginalDesktopId,
     Guid TempDesktopId,
-    IVirtualDesktop TempDesktop,
+    VirtualDesktop TempDesktop,
     string? ProcessName,
     NativeMethods.WINDOWPLACEMENT OriginalPlacement);
 
@@ -33,7 +33,7 @@ internal sealed class FullScreenTracker
     }
 
     public void Track(IntPtr hwnd, Guid originalDesktopId, Guid tempDesktopId,
-        IVirtualDesktop tempDesktop, string? processName,
+        VirtualDesktop tempDesktop, string? processName,
         NativeMethods.WINDOWPLACEMENT originalPlacement)
     {
         lock (_lock)
@@ -71,10 +71,6 @@ internal sealed class FullScreenTracker
     {
         lock (_lock)
         {
-            foreach (var entry in _entries.Values)
-            {
-                try { Marshal.ReleaseComObject(entry.TempDesktop); } catch { }
-            }
             var count = _entries.Count;
             _entries.Clear();
             Trace.WriteLine($"FullScreenTracker: Cleared {count} stale entries (Explorer restart).");
