@@ -92,3 +92,7 @@ src/MaximizeToVirtualDesktop/
 ## License
 
 MIT
+
+---
+
+*Credit to Kieran Mockford for the original idea. May he rest in peace.*
