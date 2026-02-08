@@ -11,15 +11,17 @@ namespace MaximizeToVirtualDesktop;
 internal sealed class MaximizeButtonHook : IDisposable
 {
     private readonly FullScreenManager _manager;
+    private readonly Control _syncControl;
     private IntPtr _hookHandle;
     private bool _disposed;
 
     // Must be stored as a field to prevent GC collection
     private readonly NativeMethods.LowLevelHookProc _hookProc;
 
-    public MaximizeButtonHook(FullScreenManager manager)
+    public MaximizeButtonHook(FullScreenManager manager, Control syncControl)
     {
         _manager = manager;
+        _syncControl = syncControl;
         _hookProc = HookCallback;
     }
 
@@ -55,15 +57,19 @@ internal sealed class MaximizeButtonHook : IDisposable
 
                 if (hwnd != IntPtr.Zero && IsClickOnMaximizeButton(hwnd, hookStruct.pt))
                 {
-                    Trace.WriteLine($"MaximizeButtonHook: Shift+Click on maximize button of {hwnd}");
-
                     // Find the top-level window (the click target might be a child)
                     var topLevel = GetTopLevelWindow(hwnd);
                     if (topLevel != IntPtr.Zero)
                     {
-                        _manager.Toggle(topLevel);
+                        Trace.WriteLine($"MaximizeButtonHook: Shift+Click on maximize button of {topLevel}");
 
-                        // Suppress the click — return non-zero to prevent it reaching the window
+                        // Post to UI thread — COM calls cannot be made inside an input-synchronous hook
+                        if (!_syncControl.IsDisposed && _syncControl.IsHandleCreated)
+                        {
+                            _syncControl.BeginInvoke(() => _manager.Toggle(topLevel));
+                        }
+
+                        // Suppress the click
                         return (IntPtr)1;
                     }
                 }

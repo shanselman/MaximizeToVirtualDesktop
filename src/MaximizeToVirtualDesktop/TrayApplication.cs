@@ -34,12 +34,12 @@ internal sealed class TrayApplication : Form
         _tracker = new FullScreenTracker();
         _manager = new FullScreenManager(_vds, _tracker);
         _monitor = new WindowMonitor(_manager, _tracker, this);
-        _mouseHook = new MaximizeButtonHook(_manager);
+        _mouseHook = new MaximizeButtonHook(_manager, this);
 
         // System tray icon
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application, // TODO: custom icon
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,
             Text = "Maximize to Virtual Desktop",
             Visible = true,
             ContextMenuStrip = BuildContextMenu()

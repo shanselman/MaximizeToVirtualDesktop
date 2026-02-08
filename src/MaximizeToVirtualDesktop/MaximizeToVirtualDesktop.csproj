@@ -10,6 +10,9 @@
     <AssemblyName>MaximizeToVirtualDesktop</AssemblyName>
     <RootNamespace>MaximizeToVirtualDesktop</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

@@ -1,0 +1,154 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore src/MaximizeToVirtualDesktop/MaximizeToVirtualDesktop.csproj
+
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@v4
+      with:
+        versionSpec: '6.4.x'
+
+    - name: GitVersion
+      uses: gittools/actions/gitversion/execute@v4
+      id: gitversion
+
+    - name: Set version environment variables
+      shell: pwsh
+      run: |
+        $version = '${{ steps.gitversion.outputs.semVer }}'
+        $fullVersion = '${{ steps.gitversion.outputs.fullSemVer }}'
+        $assemblyVersion = "${{ steps.gitversion.outputs.major }}.${{ steps.gitversion.outputs.minor }}.${{ steps.gitversion.outputs.patch }}.0"
+
+        Write-Host "SemVer: $version"
+        Write-Host "FullSemVer: $fullVersion"
+        Write-Host "AssemblyVersion: $assemblyVersion"
+
+        echo "VERSION=$version" >> $env:GITHUB_ENV
+        echo "FULLVERSION=$fullVersion" >> $env:GITHUB_ENV
+        echo "ASSEMBLY_VERSION=$assemblyVersion" >> $env:GITHUB_ENV
+
+    - name: Publish x64
+      run: |
+        dotnet publish src/MaximizeToVirtualDesktop/MaximizeToVirtualDesktop.csproj `
+          -c Release `
+          -r win-x64 `
+          /p:DebugType=None `
+          /p:DebugSymbols=false `
+          /p:Version=$env:VERSION `
+          /p:AssemblyVersion=$env:ASSEMBLY_VERSION `
+          /p:FileVersion=$env:ASSEMBLY_VERSION `
+          /p:AssemblyInformationalVersion=$env:FULLVERSION `
+          --self-contained
+
+    - name: Publish ARM64
+      run: |
+        dotnet publish src/MaximizeToVirtualDesktop/MaximizeToVirtualDesktop.csproj `
+          -c Release `
+          -r win-arm64 `
+          /p:DebugType=None `
+          /p:DebugSymbols=false `
+          /p:Version=$env:VERSION `
+          /p:AssemblyVersion=$env:ASSEMBLY_VERSION `
+          /p:FileVersion=$env:ASSEMBLY_VERSION `
+          /p:AssemblyInformationalVersion=$env:FULLVERSION `
+          --self-contained
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+    - name: Sign executables with Trusted Signing
+      uses: azure/trusted-signing-action@v1
+      with:
+        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        endpoint: https://wus2.codesigning.azure.net/
+        trusted-signing-account-name: hanselman
+        certificate-profile-name: WindowsEdgeLight
+        files-folder: ${{ github.workspace }}\src\MaximizeToVirtualDesktop\bin\Release\net8.0-windows
+        files-folder-filter: exe
+        files-folder-recurse: true
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+          
+    - name: Prepare artifacts
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path artifacts -Force
+        $version = $env:VERSION
+        
+        New-Item -ItemType Directory -Path "temp-x64" -Force
+        Copy-Item "src/MaximizeToVirtualDesktop/bin/Release/net8.0-windows/win-x64/publish/MaximizeToVirtualDesktop.exe" -Destination "temp-x64/"
+        Copy-Item "README.md" -Destination "temp-x64/"
+        Compress-Archive -Path "temp-x64/*" -DestinationPath "artifacts/MaximizeToVirtualDesktop-v$version-win-x64.zip"
+        
+        New-Item -ItemType Directory -Path "temp-arm64" -Force
+        Copy-Item "src/MaximizeToVirtualDesktop/bin/Release/net8.0-windows/win-arm64/publish/MaximizeToVirtualDesktop.exe" -Destination "temp-arm64/"
+        Copy-Item "README.md" -Destination "temp-arm64/"
+        Compress-Archive -Path "temp-arm64/*" -DestinationPath "artifacts/MaximizeToVirtualDesktop-v$version-win-arm64.zip"
+        
+        Remove-Item "temp-x64" -Recurse -Force
+        Remove-Item "temp-arm64" -Recurse -Force
+                  
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: MaximizeToVirtualDesktop-Release
+        path: artifacts/*.zip
+        
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: artifacts/*.zip
+        generate_release_notes: true
+        body: |
+          ## MaximizeToVirtualDesktop ${{ github.ref_name }}
+          
+          macOS green-button behavior for Windows 11 — maximize any window to its own virtual desktop.
+          
+          ### 📦 Downloads
+          
+          | File | Platform |
+          |------|----------|
+          | `MaximizeToVirtualDesktop-${{ github.ref_name }}-win-x64.zip` | Intel/AMD 64-bit Windows |
+          | `MaximizeToVirtualDesktop-${{ github.ref_name }}-win-arm64.zip` | ARM64 Windows (Surface Pro X, etc.) |
+          
+          **Self-contained** — extract and run, no .NET installation required.
+          
+          ### ⌨️ Usage
+          - `Ctrl+Alt+Shift+X` — toggle maximize to virtual desktop
+          - `Shift+Click` maximize button — same effect
+          - System tray icon for Restore All / Exit
+          
+          ---
+        append_body: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
