@@ -47,7 +47,7 @@ internal sealed class TrayApplication : Form
         _trayIcon = new NotifyIcon
         {
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,
-            Text = "Maximize to Virtual Desktop",
+            Text = "Maximize to Virtual Desktop\nCtrl+Alt+Shift+X or Shift+Click maximize button",
             Visible = true,
             ContextMenuStrip = BuildContextMenu()
         };
@@ -102,6 +102,9 @@ internal sealed class TrayApplication : Form
         _cleanupTimer.Start();
 
         Trace.WriteLine("TrayApplication: Started.");
+
+        // Show first-run balloon tip
+        ShowFirstRunBalloon();
 
         // Check for updates asynchronously
         _ = CheckForUpdatesAsync();
@@ -159,6 +162,14 @@ internal sealed class TrayApplication : Form
             _manager.RestoreAll();
         });
         menu.Items.Add(restoreAllItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
+        var howToUseItem = new ToolStripMenuItem("How to Use", null, (_, _) =>
+        {
+            ShowUsageInfo();
+        });
+        menu.Items.Add(howToUseItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
@@ -223,6 +234,48 @@ internal sealed class TrayApplication : Form
                 MessageBox.Show($"Update check failed: {ex.Message}", "Update Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private static readonly string FirstRunMarker = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "MaximizeToVirtualDesktop", ".firstrun");
+
+    private void ShowFirstRunBalloon()
+    {
+        try
+        {
+            if (File.Exists(FirstRunMarker)) return;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(FirstRunMarker)!);
+            File.WriteAllText(FirstRunMarker, "");
+
+            _trayIcon.BalloonTipTitle = "Maximize to Virtual Desktop";
+            _trayIcon.BalloonTipText =
+                "Press Ctrl+Alt+Shift+X or Shift+Click the maximize button " +
+                "to maximize a window to its own virtual desktop.";
+            _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
+            _trayIcon.ShowBalloonTip(5000);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"TrayApplication: First-run balloon failed: {ex.Message}");
+        }
+    }
+
+    private static void ShowUsageInfo()
+    {
+        MessageBox.Show(
+            "Maximize to Virtual Desktop\n\n" +
+            "Two ways to maximize a window to its own virtual desktop:\n\n" +
+            "  • Hotkey: Ctrl+Alt+Shift+X\n" +
+            "    Toggles the active window to/from a virtual desktop.\n\n" +
+            "  • Shift+Click the maximize button\n" +
+            "    Hold Shift and click any window's maximize button.\n\n" +
+            "The window is moved to a new virtual desktop and maximized.\n" +
+            "Close or restore the window to return to your original desktop.\n\n" +
+            "Use \"Restore All\" in the tray menu to bring everything back.",
+            "How to Use — Maximize to Virtual Desktop",
+            MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
