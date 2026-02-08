@@ -1,249 +1,83 @@
-# Adding MaximizeToVirtualDesktop to Winget
+# Winget Integration
 
-This guide explains how to submit MaximizeToVirtualDesktop to the [Windows Package Manager](https://github.com/microsoft/winget-pkgs) (winget).
+This app publishes to [Windows Package Manager](https://github.com/microsoft/winget-pkgs) (winget) automatically.
 
-> **📋 Quick Reference**: See [`.winget/manifest-template.yaml`](.winget/manifest-template.yaml) for a sample manifest structure.
+## How It Works
 
-## Prerequisites
+The release pipeline is fully automated:
 
-Before submitting to winget, ensure:
-
-1. **A stable release is published** on GitHub with downloadable installers/executables
-2. **Installers are code-signed** (already done via Azure Trusted Signing in our build workflow)
-3. **Release artifacts are accessible via direct URLs** (GitHub releases provide this)
-
-## Step 1: Install WingetCreate
-
-The easiest way to create a winget manifest is using Microsoft's official tool:
-
-```powershell
-winget install Microsoft.WingetCreate
+```
+Push tag v0.0.3
+  → build.yml: build, sign, create GitHub release
+  → build.yml (publish-winget job): submit manifest to winget-pkgs
+  → Microsoft validates & merges
+  → Users can run: winget install ScottHanselman.MaximizeToVirtualDesktop
 ```
 
-Or download from: https://github.com/microsoft/winget-create/releases
+Every tag push triggers the full pipeline. No manual steps after initial setup.
 
-## Step 2: Create the Manifest
+## One-Time Setup
 
-Run the following command to generate a manifest for a new package:
+Two things are needed before the first automated publish:
+
+### 1. Create the `WINGET_TOKEN` secret
+
+The winget-releaser action needs a GitHub Personal Access Token (PAT) to create pull requests against the [winget-pkgs](https://github.com/microsoft/winget-pkgs) repository.
+
+1. Go to [GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
+2. Generate new token with **`public_repo`** scope
+3. Go to this repository's **Settings → Secrets and variables → Actions**
+4. Create a new secret named **`WINGET_TOKEN`** and paste the token
+
+### 2. Submit the initial package version
+
+The first version must be submitted manually (winget-releaser handles updates, not new packages):
 
 ```powershell
+# Install the tool
+winget install Microsoft.WingetCreate
+
+# Create manifest from the latest release
 wingetcreate new https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.2/MaximizeToVirtualDesktop-v0.0.2-win-x64.zip
 ```
 
-**Important**: Replace `v0.0.2` with the actual version number you're submitting.
+When prompted, use these values:
 
-The tool will prompt you for information. Here's what to provide:
+| Field | Value |
+|-------|-------|
+| Package Identifier | `ScottHanselman.MaximizeToVirtualDesktop` |
+| Publisher | `Scott Hanselman` |
+| Package Name | `MaximizeToVirtualDesktop` |
+| License | `MIT` |
+| Short Description | `Maximize windows to virtual desktops like macOS` |
 
-| Prompt | Answer |
-|--------|--------|
-| **Package Identifier** | `ScottHanselman.MaximizeToVirtualDesktop` |
-| **Package Version** | (match the tag, e.g., `0.0.2`) |
-| **Publisher** | `Scott Hanselman` |
-| **Package Name** | `MaximizeToVirtualDesktop` |
-| **License** | `MIT` |
-| **Short Description** | `Maximize windows to virtual desktops like macOS` |
-| **Installer Type** | `zip` |
-| **Architecture** | `x64` (then add ARM64 separately) |
-
-### Adding Multiple Architectures
-
-After creating the initial manifest, add the ARM64 installer:
+Then submit:
 
 ```powershell
-wingetcreate update ScottHanselman.MaximizeToVirtualDesktop --version 0.0.2 --urls https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.2/MaximizeToVirtualDesktop-v0.0.2-win-arm64.zip --architecture arm64
+wingetcreate submit <path-to-generated-manifest>
 ```
 
-## Step 3: Review the Manifest
+After Microsoft approves the initial submission (typically 1-3 days), all subsequent versions are handled automatically by the pipeline.
 
-The manifest will be created in YAML format. Here's a sample structure:
+## Manual Re-submission
 
-```yaml
-PackageIdentifier: ScottHanselman.MaximizeToVirtualDesktop
-PackageVersion: 0.0.2
-PackageName: MaximizeToVirtualDesktop
-Publisher: Scott Hanselman
-License: MIT
-ShortDescription: Maximize windows to virtual desktops like macOS
-Installers:
-  - Architecture: x64
-    InstallerType: zip
-    InstallerUrl: https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.2/MaximizeToVirtualDesktop-v0.0.2-win-x64.zip
-    InstallerSha256: [auto-generated]
-  - Architecture: arm64
-    InstallerType: zip
-    InstallerUrl: https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.2/MaximizeToVirtualDesktop-v0.0.2-win-arm64.zip
-    InstallerSha256: [auto-generated]
-ManifestType: singleton
-ManifestVersion: 1.6.0
-```
+If a winget submission fails or needs to be re-triggered, use the manual workflow:
 
-**Note**: WingetCreate automatically calculates SHA256 hashes for you.
+**Actions → Publish to Winget (Manual) → Run workflow** → enter the version number (e.g., `0.0.3`).
 
-## Step 4: Validate the Manifest
-
-Before submitting, validate the manifest:
+Or via CLI:
 
 ```powershell
-winget validate <path-to-manifest-folder>
-```
-
-## Step 5: Test in Sandbox (Recommended)
-
-Test the installation in a clean environment:
-
-```powershell
-# Clone the winget-pkgs repo
-git clone https://github.com/microsoft/winget-pkgs
-
-# Test with Windows Sandbox
-.\winget-pkgs\Tools\SandboxTest.ps1 <path-to-your-manifest-folder>
-```
-
-This launches a Windows Sandbox instance and tests the installation.
-
-## Step 6: Submit to winget-pkgs
-
-### Option A: Use WingetCreate to Submit (Easiest)
-
-```powershell
-wingetcreate submit <path-to-manifest-folder>
-```
-
-This will:
-1. Fork the winget-pkgs repository (if you haven't already)
-2. Create a new branch
-3. Commit your manifest
-4. Open a pull request
-
-**Note**: You'll need a GitHub token with `public_repo` scope. The tool will prompt for it.
-
-### Option B: Manual Submission
-
-1. **Fork** the [winget-pkgs repository](https://github.com/microsoft/winget-pkgs)
-2. **Clone** your fork
-3. **Copy** your manifest to the correct path:
-   ```
-   manifests/s/ScottHanselman/MaximizeToVirtualDesktop/<version>/
-   ```
-4. **Commit** and push to a new branch
-5. **Open a pull request** against the main repository
-
-## Step 7: Wait for Validation
-
-The winget-pkgs repository has automated validation checks:
-
-- Schema validation
-- Hash verification
-- Installer scanning (SmartScreen, VirusTotal)
-- Manual review by Microsoft
-
-This typically takes 1-3 days. Once approved, the package will be available via:
-
-```powershell
-winget install ScottHanselman.MaximizeToVirtualDesktop
-```
-
-## Updating Future Versions
-
-For each new release, update the manifest:
-
-```powershell
-wingetcreate update ScottHanselman.MaximizeToVirtualDesktop \
-  --version 0.0.3 \
-  --urls https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.3/MaximizeToVirtualDesktop-v0.0.3-win-x64.zip \
-          https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.3/MaximizeToVirtualDesktop-v0.0.3-win-arm64.zip \
+wingetcreate update ScottHanselman.MaximizeToVirtualDesktop `
+  --version 0.0.3 `
+  --urls https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.3/MaximizeToVirtualDesktop-v0.0.3-win-x64.zip `
+         https://github.com/shanselman/MaximizeToVirtualDesktop/releases/download/v0.0.3/MaximizeToVirtualDesktop-v0.0.3-win-arm64.zip `
   --submit
 ```
 
-## Automating Winget Submissions
-
-To automate manifest updates on release, use the included GitHub Actions workflow.
-
-**✅ This repository includes a ready-to-use workflow at [`.github/workflows/winget-publish.yml`](.github/workflows/winget-publish.yml)**
-
-To enable it:
-
-1. **Create a GitHub Personal Access Token**:
-   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-   - Generate new token with `public_repo` scope
-   - Copy the token
-
-2. **Add the token to repository secrets**:
-   - Go to repository Settings → Secrets and variables → Actions
-   - Create a new secret named `WINGET_TOKEN`
-   - Paste your token
-
-3. **The workflow will automatically run** on every new release, submitting the updated manifest to winget-pkgs.
-
-The workflow uses the [winget-releaser GitHub Action](https://github.com/vedantmgoyal2009/winget-releaser) which automatically:
-- Detects new releases
-- Downloads release artifacts
-- Calculates SHA256 hashes
-- Creates/updates the winget manifest
-- Submits a PR to winget-pkgs
-
-## Important Notes
-
-### Portable vs Installer
-
-Currently, this app is distributed as a ZIP file (portable). Winget prefers installers (MSI, EXE). Options:
-
-1. **Keep as ZIP** — works fine, but users must manually extract
-2. **Create an installer** — better UX. Consider using:
-   - [Inno Setup](https://jrsoftware.org/isinfo.php) (free, scriptable)
-   - [WiX Toolset](https://wixtoolset.org/) (MSI builder)
-   - [Advanced Installer](https://www.advancedinstaller.com/) (commercial, has free tier)
-
-### Code Signing
-
-Our releases are already code-signed via Azure Trusted Signing. This helps with:
-- SmartScreen reputation
-- Winget validation (unsigned installers may be rejected)
-
-## Troubleshooting
-
-### "Package already exists"
-
-If someone else has already submitted the package, you can:
-- Contact them to transfer ownership
-- Use a different Package Identifier (e.g., `Hanselman.MaximizeToVirtualDesktop`)
-
-### Validation Failures
-
-Common issues:
-- **Incorrect SHA256** — re-run wingetcreate to recalculate hashes
-- **Invalid installer URL** — ensure the GitHub release is public and URLs are correct
-- **Installer fails SmartScreen** — code-signing helps; may need to build reputation
-
-### GitHub Token Permissions
-
-For automated submission, create a Personal Access Token with:
-- `public_repo` scope (for public repositories)
-- `workflow` scope (if using GitHub Actions)
-
 ## Resources
 
-- [Winget Documentation](https://learn.microsoft.com/en-us/windows/package-manager/)
 - [winget-pkgs Repository](https://github.com/microsoft/winget-pkgs)
 - [WingetCreate Tool](https://github.com/microsoft/winget-create)
-- [Manifest Schema Reference](https://learn.microsoft.com/en-us/windows/package-manager/package/manifest)
-- [Package Submission Guide](https://learn.microsoft.com/en-us/windows/package-manager/package/repository)
-
-## Quick Reference
-
-```powershell
-# Install WingetCreate
-winget install Microsoft.WingetCreate
-
-# Create manifest for new package
-wingetcreate new <installer-url>
-
-# Update existing package
-wingetcreate update <PackageIdentifier> --version <new-version> --urls <url1> <url2> --submit
-
-# Validate manifest
-winget validate <manifest-path>
-
-# Test installation locally
-winget install --manifest <manifest-path>
-```
+- [winget-releaser Action](https://github.com/vedantmgoyal2009/winget-releaser)
+- [Manifest Schema](https://learn.microsoft.com/en-us/windows/package-manager/package/manifest)

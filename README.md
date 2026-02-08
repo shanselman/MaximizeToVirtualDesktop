@@ -19,13 +19,13 @@ Extract and run `MaximizeToVirtualDesktop.exe`. The app is self-contained and co
 
 ### Windows Package Manager (Winget)
 
-*Coming soon* — installation will be available via:
+*Coming soon* — once the initial package is approved, install via:
 
 ```powershell
 winget install ScottHanselman.MaximizeToVirtualDesktop
 ```
 
-**Want to help?** See [WINGET.md](WINGET.md) for instructions on submitting this package to winget.
+Updates are published automatically on each release. See [WINGET.md](WINGET.md) for setup details.
 
 ## Usage
 

@@ -1,12 +1,13 @@
-name: Publish to Winget
+name: Publish to Winget (Manual)
+
+# Manual fallback for re-submitting a version to Winget.
+# Automated publishing happens in build.yml after each release.
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g., 0.0.2)'
+        description: 'Version to publish (e.g., 0.0.3)'
         required: true
         type: string
 
@@ -18,22 +19,10 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - name: Get version from release or input
-      id: get-version
-      shell: pwsh
-      run: |
-        if ('${{ github.event_name }}' -eq 'release') {
-          $version = '${{ github.event.release.tag_name }}'.TrimStart('v')
-        } else {
-          $version = '${{ inputs.version }}'
-        }
-        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
-        echo "Publishing version: $version"
-
     - name: Publish to Winget
       uses: vedantmgoyal2009/winget-releaser@v2
       with:
         identifier: ScottHanselman.MaximizeToVirtualDesktop
-        version: ${{ steps.get-version.outputs.VERSION }}
+        version: ${{ inputs.version }}
         installers-regex: '\.zip$'
         token: ${{ secrets.WINGET_TOKEN }}
