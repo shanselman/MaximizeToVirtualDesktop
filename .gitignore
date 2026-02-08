@@ -1,0 +1,20 @@
+## Build outputs
+bin/
+obj/
+
+## User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Visual Studio
+.vs/
+*.rsuser
+
+## NuGet
+packages/
+*.nupkg
+
+## Publish output
+publish/

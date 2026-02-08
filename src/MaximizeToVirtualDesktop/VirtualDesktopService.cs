@@ -1,0 +1,297 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using MaximizeToVirtualDesktop.Interop;
+
+namespace MaximizeToVirtualDesktop;
+
+/// <summary>
+/// Wraps the COM virtual desktop APIs. All methods are defensive — they catch COM
+/// exceptions and return success/failure rather than throwing.
+/// </summary>
+internal sealed class VirtualDesktopService : IDisposable
+{
+    private IVirtualDesktopManagerInternal? _managerInternal;
+    private IVirtualDesktopManager? _manager;
+    private IApplicationViewCollection? _viewCollection;
+    private bool _disposed;
+
+    public bool IsInitialized => _managerInternal != null && _manager != null;
+
+    public bool Initialize()
+    {
+        try
+        {
+            var shell = (IServiceProvider10)Activator.CreateInstance(
+                Type.GetTypeFromCLSID(ComGuids.CLSID_ImmersiveShell)!)!;
+
+            var mgrInternalGuid = typeof(IVirtualDesktopManagerInternal).GUID;
+            _managerInternal = (IVirtualDesktopManagerInternal)shell.QueryService(
+                ref Unsafe.AsRef(ComGuids.CLSID_VirtualDesktopManagerInternal), ref mgrInternalGuid);
+
+            _manager = (IVirtualDesktopManager)Activator.CreateInstance(
+                Type.GetTypeFromCLSID(ComGuids.CLSID_VirtualDesktopManager)!)!;
+
+            var viewCollGuid = typeof(IApplicationViewCollection).GUID;
+            _viewCollection = (IApplicationViewCollection)shell.QueryService(
+                ref viewCollGuid, ref viewCollGuid);
+
+            Trace.WriteLine("VirtualDesktopService: COM initialized successfully.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: COM initialization failed: {ex.Message}");
+            _managerInternal = null;
+            _manager = null;
+            _viewCollection = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reinitialize COM objects (e.g. after Explorer restart).
+    /// </summary>
+    public bool Reinitialize()
+    {
+        ReleaseComObjects();
+        return Initialize();
+    }
+
+    public Guid? GetCurrentDesktopId()
+    {
+        try
+        {
+            return _managerInternal?.GetCurrentDesktop().GetId();
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: GetCurrentDesktopId failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public Guid? GetDesktopIdForWindow(IntPtr hwnd)
+    {
+        try
+        {
+            return _manager?.GetWindowDesktopId(hwnd);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: GetDesktopIdForWindow failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Creates a new virtual desktop. Returns its ID, or null on failure.
+    /// </summary>
+    public (IVirtualDesktop? desktop, Guid? id) CreateDesktop()
+    {
+        try
+        {
+            var desktop = _managerInternal!.CreateDesktop();
+            var id = desktop.GetId();
+            Trace.WriteLine($"VirtualDesktopService: Created desktop {id}");
+            return (desktop, id);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: CreateDesktop failed: {ex.Message}");
+            return (null, null);
+        }
+    }
+
+    /// <summary>
+    /// Moves a window to the specified desktop. Uses MoveViewToDesktop for cross-process windows.
+    /// </summary>
+    public bool MoveWindowToDesktop(IntPtr hwnd, IVirtualDesktop desktop)
+    {
+        try
+        {
+            // For cross-process windows, we must use the view-based approach
+            IApplicationView? view = null;
+            _viewCollection?.GetViewForHwnd(hwnd, out view);
+
+            if (view != null)
+            {
+                _managerInternal!.MoveViewToDesktop(view, desktop);
+            }
+            else
+            {
+                // Fallback to the documented API (only works for own-process windows
+                // or when the other approach fails)
+                var desktopId = desktop.GetId();
+                _manager!.MoveWindowToDesktop(hwnd, ref desktopId);
+            }
+
+            Trace.WriteLine($"VirtualDesktopService: Moved window {hwnd} to desktop {desktop.GetId()}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: MoveWindowToDesktop failed: {ex.Message}");
+
+            // Second attempt: try main window of the process
+            try
+            {
+                NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
+                var process = Process.GetProcessById(processId);
+                if (process.MainWindowHandle != IntPtr.Zero && process.MainWindowHandle != hwnd)
+                {
+                    IApplicationView? view = null;
+                    _viewCollection?.GetViewForHwnd(process.MainWindowHandle, out view);
+                    if (view != null)
+                    {
+                        _managerInternal!.MoveViewToDesktop(view, desktop);
+                        Trace.WriteLine($"VirtualDesktopService: Moved main window instead for process {processId}");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex2)
+            {
+                Trace.WriteLine($"VirtualDesktopService: Fallback move also failed: {ex2.Message}");
+            }
+
+            return false;
+        }
+    }
+
+    public bool SwitchToDesktop(IVirtualDesktop desktop)
+    {
+        try
+        {
+            // Activate the taskbar to prevent flashing icons (from MScholtes)
+            var taskbarHwnd = NativeMethods.FindWindow("Shell_TrayWnd", null);
+            if (taskbarHwnd != IntPtr.Zero)
+            {
+                NativeMethods.GetWindowThreadProcessId(taskbarHwnd, out _);
+                var foregroundHwnd = NativeMethods.GetForegroundWindow();
+                uint desktopThreadId = NativeMethods.GetWindowThreadProcessId(taskbarHwnd, out _);
+                uint foregroundThreadId = NativeMethods.GetWindowThreadProcessId(foregroundHwnd, out _);
+                uint currentThreadId = NativeMethods.GetCurrentThreadId();
+
+                if (desktopThreadId != 0 && foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+                {
+                    NativeMethods.AttachThreadInput(desktopThreadId, currentThreadId, true);
+                    NativeMethods.AttachThreadInput(foregroundThreadId, currentThreadId, true);
+                    NativeMethods.SetForegroundWindow(taskbarHwnd);
+                    NativeMethods.AttachThreadInput(foregroundThreadId, currentThreadId, false);
+                    NativeMethods.AttachThreadInput(desktopThreadId, currentThreadId, false);
+                }
+            }
+
+            _managerInternal!.SwitchDesktopWithAnimation(desktop);
+
+            Trace.WriteLine($"VirtualDesktopService: Switched to desktop {desktop.GetId()}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: SwitchToDesktop failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes a virtual desktop. Windows on it move to the fallback desktop.
+    /// </summary>
+    public bool RemoveDesktop(IVirtualDesktop desktop)
+    {
+        try
+        {
+            // Find a fallback desktop (the current one, or adjacent)
+            var current = _managerInternal!.GetCurrentDesktop();
+            IVirtualDesktop fallback;
+
+            if (current.GetId() == desktop.GetId())
+            {
+                // We're removing the current desktop — find an adjacent one
+                int hr = _managerInternal.GetAdjacentDesktop(desktop, 3, out fallback); // 3 = Left
+                if (hr != 0)
+                {
+                    hr = _managerInternal.GetAdjacentDesktop(desktop, 4, out fallback); // 4 = Right
+                    if (hr != 0)
+                    {
+                        Trace.WriteLine("VirtualDesktopService: No adjacent desktop for fallback, cannot remove.");
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                fallback = current;
+            }
+
+            _managerInternal.RemoveDesktop(desktop, fallback);
+            Trace.WriteLine($"VirtualDesktopService: Removed desktop {desktop.GetId()}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: RemoveDesktop failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool SetDesktopName(IVirtualDesktop desktop, string name)
+    {
+        try
+        {
+            _managerInternal!.SetDesktopName(desktop, name);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: SetDesktopName failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public IVirtualDesktop? FindDesktop(Guid desktopId)
+    {
+        try
+        {
+            return _managerInternal?.FindDesktop(ref desktopId);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"VirtualDesktopService: FindDesktop failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private void ReleaseComObjects()
+    {
+        if (_managerInternal != null) { Marshal.ReleaseComObject(_managerInternal); _managerInternal = null; }
+        if (_manager != null) { Marshal.ReleaseComObject(_manager); _manager = null; }
+        if (_viewCollection != null) { Marshal.ReleaseComObject(_viewCollection); _viewCollection = null; }
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            ReleaseComObjects();
+            _disposed = true;
+        }
+    }
+}
+
+// Helper to pass readonly Guid fields by ref to COM
+internal static class Unsafe
+{
+    internal static ref Guid AsRef(in Guid guid)
+    {
+        // We need to pass a readonly static Guid by ref to COM QueryService.
+        // This is safe because COM only reads the value.
+        unsafe
+        {
+            fixed (Guid* p = &guid)
+            {
+                return ref *p;
+            }
+        }
+    }
+}
