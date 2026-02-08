@@ -251,10 +251,14 @@ internal sealed class TrayApplication : Form
     private ContextMenuStrip BuildContextMenu()
     {
         var menu = new ContextMenuStrip();
+        IntPtr capturedForegroundWindow = IntPtr.Zero;
 
         var statusItem = new ToolStripMenuItem("No windows tracked") { Enabled = false };
         menu.Opening += (_, _) =>
         {
+            // Capture the foreground window before the menu opens (before focus changes to the menu)
+            capturedForegroundWindow = NativeMethods.GetForegroundWindow();
+            
             var count = _tracker.Count;
             statusItem.Text = count == 0
                 ? "No windows tracked"
@@ -271,9 +275,9 @@ internal sealed class TrayApplication : Form
 
         var pinItem = new ToolStripMenuItem("Pin/Unpin to All Desktops", null, (_, _) =>
         {
-            var hwnd = NativeMethods.GetForegroundWindow();
-            if (hwnd != IntPtr.Zero && hwnd != Handle)
-                _manager.PinToggle(hwnd);
+            // Use the captured foreground window instead of querying it now
+            if (capturedForegroundWindow != IntPtr.Zero && capturedForegroundWindow != Handle)
+                _manager.PinToggle(capturedForegroundWindow);
         });
         menu.Items.Add(pinItem);
 
