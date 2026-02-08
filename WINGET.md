@@ -2,6 +2,8 @@
 
 This guide explains how to submit MaximizeToVirtualDesktop to the [Windows Package Manager](https://github.com/microsoft/winget-pkgs) (winget).
 
+> **📋 Quick Reference**: See [`.winget/manifest-template.yaml`](.winget/manifest-template.yaml) for a sample manifest structure.
+
 ## Prerequisites
 
 Before submitting to winget, ensure:
@@ -155,28 +157,30 @@ wingetcreate update ScottHanselman.MaximizeToVirtualDesktop \
 
 ## Automating Winget Submissions
 
-To automate manifest updates on release, consider using:
+To automate manifest updates on release, use the included GitHub Actions workflow.
 
-- **[winget-releaser GitHub Action](https://github.com/vedantmgoyal2009/winget-releaser)** — automatically creates/updates manifests on new GitHub releases
+**✅ This repository includes a ready-to-use workflow at [`.github/workflows/winget-publish.yml`](.github/workflows/winget-publish.yml)**
 
-Example workflow (`.github/workflows/winget-publish.yml`):
+To enable it:
 
-```yaml
-name: Publish to Winget
+1. **Create a GitHub Personal Access Token**:
+   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Generate new token with `public_repo` scope
+   - Copy the token
 
-on:
-  release:
-    types: [published]
+2. **Add the token to repository secrets**:
+   - Go to repository Settings → Secrets and variables → Actions
+   - Create a new secret named `WINGET_TOKEN`
+   - Paste your token
 
-jobs:
-  publish:
-    runs-on: windows-latest
-    steps:
-      - uses: vedantmgoyal2009/winget-releaser@v2
-        with:
-          identifier: ScottHanselman.MaximizeToVirtualDesktop
-          token: ${{ secrets.GITHUB_TOKEN }}
-```
+3. **The workflow will automatically run** on every new release, submitting the updated manifest to winget-pkgs.
+
+The workflow uses the [winget-releaser GitHub Action](https://github.com/vedantmgoyal2009/winget-releaser) which automatically:
+- Detects new releases
+- Downloads release artifacts
+- Calculates SHA256 hashes
+- Creates/updates the winget manifest
+- Submits a PR to winget-pkgs
 
 ## Important Notes
 
