@@ -87,6 +87,11 @@ internal sealed class FullScreenManager
             return;
         }
 
+        // 1b. Determine target monitor and collect companion windows
+        var targetMonitor = GetTargetMonitor(hwnd);
+        var companions = GetCompanionWindows(targetMonitor, hwnd);
+        Trace.WriteLine($"FullScreenManager: Target monitor={targetMonitor.DeviceName}, {companions.Count} companion window(s).");
+
         // 2. Create new virtual desktop
         var (tempDesktop, tempDesktopId) = _vds.CreateDesktop();
         if (tempDesktop == null || tempDesktopId == null)
@@ -120,6 +125,18 @@ internal sealed class FullScreenManager
             return;
         }
 
+        // 4b. Move companion windows to new desktop
+        int movedCompanions = 0;
+        foreach (var companion in companions)
+        {
+            if (_vds.MoveWindowToDesktop(companion, tempDesktop))
+                movedCompanions++;
+            else
+                Trace.WriteLine($"FullScreenManager: Failed to move companion {companion}, skipping.");
+        }
+        if (companions.Count > 0)
+            Trace.WriteLine($"FullScreenManager: Moved {movedCompanions}/{companions.Count} companion(s) to new desktop.");
+
         // 5. Switch to the new desktop
         if (!_vds.SwitchToDesktop(tempDesktop))
         {
@@ -138,6 +155,10 @@ internal sealed class FullScreenManager
             Marshal.ReleaseComObject(tempDesktop);
             return;
         }
+
+        // 5b. Move window to target monitor (multi-monitor setups)
+        if (Screen.AllScreens.Length > 1)
+            MoveWindowToMonitor(hwnd, targetMonitor);
 
         // 6. Maximize the window — delay lets desktop switch animation finish first
         bool elevated = NativeMethods.IsWindowElevated(hwnd);
@@ -314,5 +335,106 @@ internal sealed class FullScreenManager
             else
                 NotificationOverlay.ShowNotification("⚠ Pin Failed", processName ?? "", hwnd);
         }
+    }
+
+    // ---- Multi-monitor helpers ----
+
+    private static readonly HashSet<string> _shellClassNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"
+    };
+
+    /// <summary>
+    /// Determines the target monitor for maximization.
+    /// Default: the horizontally-middle monitor. Single-monitor: current monitor.
+    /// </summary>
+    private static Screen GetTargetMonitor(IntPtr hwnd)
+    {
+        var screens = Screen.AllScreens.OrderBy(s => s.Bounds.X).ToArray();
+        if (screens.Length < 2)
+            return Screen.FromHandle(hwnd);
+        return screens[screens.Length / 2];
+    }
+
+    /// <summary>
+    /// Enumerates visible top-level windows on monitors OTHER than the target.
+    /// These "companion" windows will be brought along to the new virtual desktop.
+    /// </summary>
+    private List<IntPtr> GetCompanionWindows(Screen targetMonitor, IntPtr primaryHwnd)
+    {
+        var companions = new List<IntPtr>();
+        var classNameBuf = new char[256];
+
+        NativeMethods.EnumWindows((hwnd, _) =>
+        {
+            if (hwnd == primaryHwnd) return true;
+            if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+            if (!NativeMethods.IsWindow(hwnd)) return true;
+            if (NativeMethods.GetWindowTextLength(hwnd) == 0) return true;
+
+            // Skip known shell / desktop windows
+            int len = NativeMethods.GetClassName(hwnd, classNameBuf, classNameBuf.Length);
+            if (len > 0)
+            {
+                var className = new string(classNameBuf, 0, len);
+                if (_shellClassNames.Contains(className)) return true;
+            }
+
+            // Skip tool windows (unless they also carry WS_EX_APPWINDOW)
+            int exStyle = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
+            if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0
+                && (exStyle & NativeMethods.WS_EX_APPWINDOW) == 0)
+                return true;
+
+            // Skip minimized windows
+            var placement = NativeMethods.WINDOWPLACEMENT.Default;
+            if (!NativeMethods.GetWindowPlacement(hwnd, ref placement)) return true;
+            if (placement.showCmd == NativeMethods.SW_SHOWMINIMIZED) return true;
+
+            // Skip windows on the target monitor — they stay behind on the original desktop
+            var screen = Screen.FromHandle(hwnd);
+            if (screen.DeviceName == targetMonitor.DeviceName) return true;
+
+            // Skip already-pinned windows (they're visible on all desktops anyway)
+            if (_vds.IsWindowPinned(hwnd)) return true;
+
+            companions.Add(hwnd);
+            return true;
+        }, IntPtr.Zero);
+
+        return companions;
+    }
+
+    /// <summary>
+    /// Repositions a window to the center of the target monitor.
+    /// Restores a maximized window first since maximized windows can't be freely repositioned.
+    /// </summary>
+    private static void MoveWindowToMonitor(IntPtr hwnd, Screen targetMonitor)
+    {
+        var currentScreen = Screen.FromHandle(hwnd);
+        if (currentScreen.DeviceName == targetMonitor.DeviceName)
+            return;
+
+        // Restore if maximized — maximized windows are locked to their monitor
+        var placement = NativeMethods.WINDOWPLACEMENT.Default;
+        NativeMethods.GetWindowPlacement(hwnd, ref placement);
+        if (placement.showCmd == NativeMethods.SW_SHOWMAXIMIZED)
+            NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+
+        // Get current window size
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect))
+            return;
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+
+        // Center on target monitor's working area
+        var wa = targetMonitor.WorkingArea;
+        int x = wa.Left + (wa.Width - width) / 2;
+        int y = wa.Top + (wa.Height - height) / 2;
+
+        NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+
+        Trace.WriteLine($"FullScreenManager: Repositioned {hwnd} to monitor {targetMonitor.DeviceName} at ({x},{y})");
     }
 }
