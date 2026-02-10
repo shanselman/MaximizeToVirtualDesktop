@@ -143,7 +143,7 @@ internal sealed class VirtualDesktopService : IDisposable
             try
             {
                 using var process = Process.GetProcessById(processId);
-                processName = process.ProcessName.ToLowerInvariant();
+                processName = process.ProcessName; // Keep original casing
             }
             catch (ArgumentException)
             {

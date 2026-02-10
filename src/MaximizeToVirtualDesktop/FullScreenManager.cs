@@ -158,7 +158,7 @@ internal sealed class FullScreenManager
                 if (isExplorerProcess)
                 {
                     NotificationOverlay.ShowNotification("⚠ Windows Limitation",
-                        "Explorer windows cannot be moved\n(Windows COM API restriction)", hwnd);
+                        "File Explorer windows cannot be moved\n(Windows COM restriction)", hwnd);
                 }
                 
                 // Rollback: move already-moved windows back
