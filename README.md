@@ -89,6 +89,7 @@ src/MaximizeToVirtualDesktop/
 ## Known Limitations
 
 - **Elevated windows** — cannot move windows running as Administrator from a non-elevated instance.
+- **Windows Explorer (File Explorer) windows** — Windows' COM API (`IApplicationViewCollection.GetViewForHwnd`) returns null for Explorer windows, preventing them from being moved to virtual desktops programmatically. This is a Windows platform limitation affecting all virtual desktop automation tools, not specific to this app. **Workaround**: Use the hotkey/Shift+Click on other applications, or manually move Explorer windows using Task View (Win+Tab).
 - **App crash** — if the app crashes, temporary desktops are cleaned up automatically on next launch. They're prefixed with `[MVD]` in Task View for easy manual identification.
 
 ## The Virtual Desktop GUID Problem
