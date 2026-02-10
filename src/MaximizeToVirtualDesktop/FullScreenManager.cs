@@ -141,7 +141,8 @@ internal sealed class FullScreenManager
 
         // 5. Move all windows to new desktop
         var movedWindows = new List<IntPtr>();
-        bool isExplorerProcess = processName?.ToLowerInvariant().Contains("explorer") == true;
+        // Explorer.exe windows are known to fail due to Windows COM API limitation
+        bool isExplorerProcess = processName?.Equals("explorer", StringComparison.OrdinalIgnoreCase) == true;
         
         foreach (var window in allWindows)
         {

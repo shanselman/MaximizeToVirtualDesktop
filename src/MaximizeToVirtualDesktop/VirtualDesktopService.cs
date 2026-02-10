@@ -137,20 +137,34 @@ internal sealed class VirtualDesktopService : IDisposable
         NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
         string processName = string.Empty;
         
-        try
+        // Get process name for diagnostics
+        if (processId > 0)
         {
-            using var process = Process.GetProcessById(processId);
-            processName = process.ProcessName.ToLowerInvariant();
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                processName = process.ProcessName.ToLowerInvariant();
+            }
+            catch (ArgumentException)
+            {
+                // Process has exited
+                Trace.WriteLine($"VirtualDesktopService: Process {processId} has exited");
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Process has no associated process (e.g., system process)
+                Trace.WriteLine($"VirtualDesktopService: Cannot get process info for {processId}: {ex.Message}");
+            }
         }
-        catch
+        else
         {
-            // Process may have exited, continue anyway
+            Trace.WriteLine($"VirtualDesktopService: Invalid process ID for hwnd {hwnd}");
         }
 
         try
         {
             // Attempt 1: Use IApplicationView (standard cross-process method)
-            int hr = _viewCollection?.GetViewForHwnd(hwnd, out view) ?? -1;
+            int hr = _viewCollection?.GetViewForHwnd(hwnd, out view) ?? unchecked((int)0x80004003); // E_POINTER if null
             
             if (view != null)
             {
