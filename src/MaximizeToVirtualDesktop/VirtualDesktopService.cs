@@ -134,57 +134,52 @@ internal sealed class VirtualDesktopService : IDisposable
     public bool MoveWindowToDesktop(IntPtr hwnd, IVirtualDesktop desktop)
     {
         IApplicationView? view = null;
+        NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
+        string processName = string.Empty;
+        
         try
         {
-            // For cross-process windows, we must use the view-based approach
-            _viewCollection?.GetViewForHwnd(hwnd, out view);
+            using var process = Process.GetProcessById(processId);
+            processName = process.ProcessName.ToLowerInvariant();
+        }
+        catch
+        {
+            // Process may have exited, continue anyway
+        }
 
+        try
+        {
+            // Attempt 1: Use IApplicationView (standard cross-process method)
+            int hr = _viewCollection?.GetViewForHwnd(hwnd, out view) ?? -1;
+            
             if (view != null)
             {
                 _managerInternal!.MoveViewToDesktop(view, desktop);
+                Trace.WriteLine($"VirtualDesktopService: Moved window {hwnd} ({processName}) to desktop {desktop.GetId()}");
+                return true;
             }
-            else
+            
+            // Attempt 2: Try documented API as fallback
+            // This typically only works for windows owned by this process
+            try
             {
-                // Fallback to the documented API (only works for own-process windows
-                // or when the other approach fails)
                 var desktopId = desktop.GetId();
                 _manager!.MoveWindowToDesktop(hwnd, ref desktopId);
+                Trace.WriteLine($"VirtualDesktopService: Moved window {hwnd} ({processName}) via IVirtualDesktopManager to desktop {desktopId}");
+                return true;
             }
-
-            Trace.WriteLine($"VirtualDesktopService: Moved window {hwnd} to desktop {desktop.GetId()}");
-            return true;
+            catch (COMException comEx) when (comEx.HResult == unchecked((int)0x80070005)) // E_ACCESSDENIED
+            {
+                // Expected for windows from other processes
+                Trace.WriteLine($"VirtualDesktopService: IVirtualDesktopManager access denied (expected for cross-process), hr={hr:X8}");
+            }
+            
+            Trace.WriteLine($"VirtualDesktopService: GetViewForHwnd returned view=null for hwnd={hwnd}, process={processName}, hr={hr:X8}");
+            return false;
         }
         catch (Exception ex)
         {
-            Trace.WriteLine($"VirtualDesktopService: MoveWindowToDesktop failed: {ex.Message}");
-            if (view != null) { Marshal.ReleaseComObject(view); view = null; }
-
-            // Second attempt: try main window of the process
-            IApplicationView? fallbackView = null;
-            try
-            {
-                NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
-                using var process = Process.GetProcessById(processId);
-                if (process.MainWindowHandle != IntPtr.Zero && process.MainWindowHandle != hwnd)
-                {
-                    _viewCollection?.GetViewForHwnd(process.MainWindowHandle, out fallbackView);
-                    if (fallbackView != null)
-                    {
-                        _managerInternal!.MoveViewToDesktop(fallbackView, desktop);
-                        Trace.WriteLine($"VirtualDesktopService: Moved main window instead for process {processId}");
-                        return true;
-                    }
-                }
-            }
-            catch (Exception ex2)
-            {
-                Trace.WriteLine($"VirtualDesktopService: Fallback move also failed: {ex2.Message}");
-            }
-            finally
-            {
-                if (fallbackView != null) Marshal.ReleaseComObject(fallbackView);
-            }
-
+            Trace.WriteLine($"VirtualDesktopService: MoveWindowToDesktop failed for {processName} hwnd={hwnd}: {ex.Message}");
             return false;
         }
         finally

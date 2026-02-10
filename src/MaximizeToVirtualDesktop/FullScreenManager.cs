@@ -141,6 +141,8 @@ internal sealed class FullScreenManager
 
         // 5. Move all windows to new desktop
         var movedWindows = new List<IntPtr>();
+        bool isExplorerProcess = processName?.ToLowerInvariant().Contains("explorer") == true;
+        
         foreach (var window in allWindows)
         {
             if (_vds.MoveWindowToDesktop(window, tempDesktop))
@@ -150,6 +152,14 @@ internal sealed class FullScreenManager
             else
             {
                 Trace.WriteLine($"FullScreenManager: Failed to move window {window}, rolling back.");
+                
+                // Show specific message for Windows Explorer limitation
+                if (isExplorerProcess)
+                {
+                    NotificationOverlay.ShowNotification("⚠ Windows Limitation",
+                        "Explorer windows cannot be moved\n(Windows COM API restriction)", hwnd);
+                }
+                
                 // Rollback: move already-moved windows back
                 var origDesktop = _vds.FindDesktop(originalDesktopId.Value);
                 try
