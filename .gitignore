@@ -18,3 +18,5 @@ packages/
 
 ## Publish output
 publish/
+
+mvd-debug.log

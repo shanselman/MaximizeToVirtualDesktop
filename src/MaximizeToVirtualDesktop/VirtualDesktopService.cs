@@ -156,7 +156,7 @@ internal sealed class VirtualDesktopService : IDisposable
         }
         catch (Exception ex)
         {
-            Trace.WriteLine($"VirtualDesktopService: MoveWindowToDesktop failed: {ex.Message}");
+            Trace.WriteLine($"VirtualDesktopService: MoveWindowToDesktop failed for hwnd={hwnd}: {ex.GetType().Name}: {ex.Message}");
             if (view != null) { Marshal.ReleaseComObject(view); view = null; }
 
             // Second attempt: try main window of the process

@@ -77,8 +77,22 @@ internal sealed class FullScreenManager
             return;
         }
 
-        // 1. Find all windows from the same process
-        var allWindows = GetAllProcessWindows(hwnd);
+        // 1. Find all windows to move together
+        // Explorer is a single-process app — all File Explorer windows share one process,
+        // so grouping by process would grab every Explorer window. Just move the targeted one.
+        NativeMethods.GetWindowThreadProcessId(hwnd, out int targetPid);
+        bool isExplorer = false;
+        try
+        {
+            using var proc = Process.GetProcessById(targetPid);
+            isExplorer = proc.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { }
+
+        var allWindows = isExplorer
+            ? new List<IntPtr> { hwnd }
+            : GetAllProcessWindows(hwnd);
+
         if (allWindows.Count == 0)
         {
             Trace.WriteLine("FullScreenManager: No valid windows found for process, aborting.");
@@ -147,10 +161,10 @@ internal sealed class FullScreenManager
             {
                 movedWindows.Add(window);
             }
-            else
+            else if (window == hwnd)
             {
-                Trace.WriteLine($"FullScreenManager: Failed to move window {window}, rolling back.");
-                // Rollback: move already-moved windows back
+                // Primary window failed — must rollback
+                Trace.WriteLine($"FullScreenManager: Failed to move primary window {window}, rolling back.");
                 var origDesktop = _vds.FindDesktop(originalDesktopId.Value);
                 try
                 {
@@ -169,6 +183,11 @@ internal sealed class FullScreenManager
                 _vds.RemoveDesktop(tempDesktop);
                 Marshal.ReleaseComObject(tempDesktop);
                 return;
+            }
+            else
+            {
+                // Secondary window failed — skip it, not critical
+                Trace.WriteLine($"FullScreenManager: Skipping secondary window {window} (move failed).");
             }
         }
 
