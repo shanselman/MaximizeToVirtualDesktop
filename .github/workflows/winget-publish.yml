@@ -1,0 +1,28 @@
+name: Publish to Winget (Manual)
+
+# Manual fallback for re-submitting a version to Winget.
+# Automated publishing happens in build.yml after each release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.0.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Publish to Winget
+      uses: vedantmgoyal2009/winget-releaser@v2
+      with:
+        identifier: ScottHanselman.MaximizeToVirtualDesktop
+        version: ${{ inputs.version }}
+        installers-regex: '\.zip$'
+        token: ${{ secrets.WINGET_TOKEN }}

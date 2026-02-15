@@ -6,6 +6,27 @@ When triggered, the foreground window is moved to a brand-new virtual desktop an
 
 ![MaximizeToVirtualDesktop demo](img/maximizetovd_compressed.gif)
 
+## Installation
+
+### Download from Releases
+
+Download the latest release from the [Releases page](https://github.com/shanselman/MaximizeToVirtualDesktop/releases):
+
+- **Intel/AMD (x64)**: `MaximizeToVirtualDesktop-v*-win-x64.zip`
+- **ARM64**: `MaximizeToVirtualDesktop-v*-win-arm64.zip`
+
+Extract and run `MaximizeToVirtualDesktop.exe`. The app is self-contained and code-signed.
+
+### Windows Package Manager (Winget)
+
+*Coming soon* — once the initial package is approved, install via:
+
+```powershell
+winget install ScottHanselman.MaximizeToVirtualDesktop
+```
+
+Updates are published automatically on each release. See [WINGET.md](WINGET.md) for setup details.
+
 ## Usage
 
 | Trigger | How |
