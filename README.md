@@ -44,6 +44,7 @@ Shift+Click works wherever Windows 11 Snap Layouts works — apps that correctly
 | Windows Terminal (WinUI) | ✅ |
 | VS Code (Electron 13+) | ✅ |
 | Visual Studio | ✅ |
+| MSTSC / MSRDC (full-screen or multimon) | ✅ |
 | Apps with fully custom title bars | ❌ (use hotkey) |
 
 The hotkey **always** works, regardless of the window type.

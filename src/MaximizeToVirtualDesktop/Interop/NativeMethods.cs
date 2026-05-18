@@ -59,9 +59,28 @@ internal static partial class NativeMethods
     internal static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("user32.dll")]
+    internal static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
     internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
     internal const uint GW_OWNER = 4;
+    internal const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+    internal const int SM_XVIRTUALSCREEN = 76;
+    internal const int SM_YVIRTUALSCREEN = 77;
+    internal const int SM_CXVIRTUALSCREEN = 78;
+    internal const int SM_CYVIRTUALSCREEN = 79;
 
     [DllImport("user32.dll")]
     internal static extern int GetWindowTextLength(IntPtr hWnd);
@@ -257,6 +276,26 @@ internal static partial class NativeMethods
     internal struct RECT
     {
         public int Left, Top, Right, Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MONITORINFO
+    {
+        public uint cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+
+        public static MONITORINFO Default
+        {
+            get
+            {
+                return new MONITORINFO
+                {
+                    cbSize = (uint)Marshal.SizeOf<MONITORINFO>()
+                };
+            }
+        }
     }
 
     internal const uint SW_SHOWNORMAL = 1;

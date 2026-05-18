@@ -101,7 +101,7 @@ internal sealed class WindowMonitor : IDisposable
         // Not tracked yet: check for a new maximize event (including via shortcut)
         var newPlacement = NativeMethods.WINDOWPLACEMENT.Default;
         if (!NativeMethods.GetWindowPlacement(hwnd, ref newPlacement)) return;
-        if (newPlacement.showCmd != NativeMethods.SW_MAXIMIZE) return;
+        if (newPlacement.showCmd != NativeMethods.SW_MAXIMIZE && !IsRdpFullscreenTransition(hwnd)) return;
 
         bool shiftHeld = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0;
         bool triggerVirtualDesktop = _settings.InvertShiftClick ? !shiftHeld : shiftHeld;
@@ -197,6 +197,61 @@ internal sealed class WindowMonitor : IDisposable
         {
             // App is shutting down
         }
+    }
+
+    private static bool IsRdpFullscreenTransition(IntPtr hwnd)
+    {
+        if (!IsRdpWindow(hwnd)) return false;
+        if (!NativeMethods.GetWindowRect(hwnd, out var windowRect)) return false;
+
+        var monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero) return false;
+
+        var monitorInfo = NativeMethods.MONITORINFO.Default;
+        if (!NativeMethods.GetMonitorInfo(monitor, ref monitorInfo)) return false;
+
+        return RectEquals(windowRect, monitorInfo.rcMonitor, 2)
+            || RectEquals(windowRect, GetVirtualScreenRect(), 2);
+    }
+
+    private static bool IsRdpWindow(IntPtr hwnd)
+    {
+        NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
+        if (processId <= 0) return false;
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.ProcessName.Equals("mstsc", StringComparison.OrdinalIgnoreCase)
+                || process.ProcessName.Equals("msrdc", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static NativeMethods.RECT GetVirtualScreenRect()
+    {
+        int left = NativeMethods.GetSystemMetrics(NativeMethods.SM_XVIRTUALSCREEN);
+        int top = NativeMethods.GetSystemMetrics(NativeMethods.SM_YVIRTUALSCREEN);
+        int width = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN);
+        int height = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
+        return new NativeMethods.RECT
+        {
+            Left = left,
+            Top = top,
+            Right = left + width,
+            Bottom = top + height
+        };
+    }
+
+    private static bool RectEquals(NativeMethods.RECT a, NativeMethods.RECT b, int tolerance)
+    {
+        return Math.Abs(a.Left - b.Left) <= tolerance
+            && Math.Abs(a.Top - b.Top) <= tolerance
+            && Math.Abs(a.Right - b.Right) <= tolerance
+            && Math.Abs(a.Bottom - b.Bottom) <= tolerance;
     }
 
     public void Dispose()
