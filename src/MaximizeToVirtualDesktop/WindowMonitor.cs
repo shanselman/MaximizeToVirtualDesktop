@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using MaximizeToVirtualDesktop.Interop;
 
@@ -12,6 +13,17 @@ namespace MaximizeToVirtualDesktop;
 internal sealed class WindowMonitor : IDisposable
 {
     private const int RdpGeometryTolerance = 2;
+    private const int StandardFallbackDelayMs = 200;
+    private const int RdpFallbackDelayMs = 1000;
+    private const int StandardRestoreDelayMs = 100;
+    private const int RdpRestoreDelayMs = 1000;
+
+    private enum FullscreenState
+    {
+        None,
+        Maximized,
+        RdpFullscreen
+    }
 
     private readonly FullScreenManager _manager;
     private readonly FullScreenTracker _tracker;
@@ -28,7 +40,10 @@ internal sealed class WindowMonitor : IDisposable
     private IntPtr _moveSizeEndHook;
     // Track windows that have been maximized but need to wait for resize end
     // Access to this set must happen only on the UI thread.
-    private readonly HashSet<IntPtr> _pendingMaximize = new();
+    private readonly Dictionary<IntPtr, FullscreenState> _pendingMaximize = new();
+    private readonly HashSet<IntPtr> _pendingRdpMaximize = new();
+    private readonly HashSet<IntPtr> _pendingRestore = new();
+    private bool _rdpMaximizeScheduled;
 
     public WindowMonitor(FullScreenManager manager, FullScreenTracker tracker, Control syncControl, AppSettings settings)
     {
@@ -84,58 +99,63 @@ internal sealed class WindowMonitor : IDisposable
         if (idObject != NativeMethods.OBJID_WINDOW || idChild != 0) return;
 
         // If the window is already tracked, check if it is being restored (i.e., no longer maximized)
-        if (_tracker.IsTracked(hwnd))
+        var trackedEntry = _tracker.Get(hwnd);
+        if (trackedEntry != null)
         {
-            var placement = NativeMethods.WINDOWPLACEMENT.Default;
-            if (NativeMethods.GetWindowPlacement(hwnd, ref placement))
+            if (!trackedEntry.IsRdpFullscreen && GetFullscreenState(hwnd) == FullscreenState.None)
             {
-                if (placement.showCmd != NativeMethods.SW_MAXIMIZE)
-                {
-                    Trace.WriteLine($"WindowMonitor: Tracked window {hwnd} restored via location change.");
-                    MarshalToUiThread(() => _manager.Restore(hwnd));
-                    return;
-                }
+                Trace.WriteLine($"WindowMonitor: Tracked window {hwnd} restored via location change.");
+                QueueRestore(hwnd, StandardRestoreDelayMs);
             }
-            // Still maximized; let MoveSizeEnd handle pending maximize.
+
+            // Still maximized, or an RDP fullscreen window with noisy geometry changes.
             return;
         }
 
         // Not tracked yet: check for a new maximize event (including via shortcut)
-        var newPlacement = NativeMethods.WINDOWPLACEMENT.Default;
-        if (!NativeMethods.GetWindowPlacement(hwnd, ref newPlacement)) return;
-        if (newPlacement.showCmd != NativeMethods.SW_MAXIMIZE && !IsRdpFullscreenTransition(hwnd)) return;
+        var fullscreenState = GetFullscreenState(hwnd);
+        if (fullscreenState == FullscreenState.None) return;
+        if (!IsForegroundWindowOrOwner(hwnd)) return;
 
         bool shiftHeld = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0;
         bool triggerVirtualDesktop = _settings.InvertShiftClick ? !shiftHeld : shiftHeld;
         if (triggerVirtualDesktop)
         {
+            if (fullscreenState == FullscreenState.RdpFullscreen)
+            {
+                QueueRdpMaximize(hwnd);
+                return;
+            }
+
             // Defer maximization until after the resize operation completes
             MarshalToUiThread(() =>
             {
-                if (_pendingMaximize.Add(hwnd))
+                if (!_pendingMaximize.ContainsKey(hwnd))
                 {
+                    _pendingMaximize[hwnd] = fullscreenState;
                     Trace.WriteLine($"WindowMonitor: Queued maximize for window {hwnd} after resize end.");
+                    int delayMs = fullscreenState == FullscreenState.RdpFullscreen
+                        ? RdpFallbackDelayMs
+                        : StandardFallbackDelayMs;
+
                     // Schedule a fallback in case MoveSizeEnd does not fire (e.g., keyboard shortcut)
                     _ = Task.Run(async () =>
                     {
-                        await Task.Delay(200);
+                        await Task.Delay(delayMs);
                         // Marshal the check/remove back onto the UI thread
                         MarshalToUiThread(() =>
                         {
-                            if (_pendingMaximize.Contains(hwnd))
+                            if (_pendingMaximize.Remove(hwnd, out var pendingState))
                             {
-                                _pendingMaximize.Remove(hwnd);
-                                var placement = NativeMethods.WINDOWPLACEMENT.Default;
-                                bool isMaximized = NativeMethods.GetWindowPlacement(hwnd, ref placement) && placement.showCmd == NativeMethods.SW_MAXIMIZE;
-                                if (isMaximized)
+                                var currentState = GetFullscreenState(hwnd);
+                                if (currentState != FullscreenState.None && IsForegroundWindowOrOwner(hwnd))
                                 {
                                     Trace.WriteLine($"WindowMonitor: Fallback processing for pending maximize window {hwnd}.");
-                                    _manager.MaximizeToDesktop(hwnd);
+                                    _manager.MaximizeToDesktop(hwnd, pendingState == FullscreenState.RdpFullscreen);
                                 }
                                 else
                                 {
-                                    Trace.WriteLine($"WindowMonitor: Fallback detected restore for pending window {hwnd}.");
-                                    _manager.Restore(hwnd);
+                                    Trace.WriteLine($"WindowMonitor: Fallback detected pending window {hwnd} is no longer fullscreen.");
                                 }
                             }
                         });
@@ -143,6 +163,44 @@ internal sealed class WindowMonitor : IDisposable
                 }
             });
         }
+    }
+
+    private void QueueRdpMaximize(IntPtr hwnd)
+    {
+        MarshalToUiThread(() =>
+        {
+            _pendingRdpMaximize.Add(hwnd);
+            Trace.WriteLine($"WindowMonitor: Queued RDP fullscreen candidate {hwnd}.");
+
+            if (_rdpMaximizeScheduled) return;
+            _rdpMaximizeScheduled = true;
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(RdpFallbackDelayMs);
+
+                MarshalToUiThread(() =>
+                {
+                    var candidates = _pendingRdpMaximize.ToList();
+                    _pendingRdpMaximize.Clear();
+                    _rdpMaximizeScheduled = false;
+
+                    var selected = candidates
+                        .Where(hwnd => GetFullscreenState(hwnd) == FullscreenState.RdpFullscreen)
+                        .OrderByDescending(IsForegroundWindowOrOwner)
+                        .FirstOrDefault(_manager.CanManageWindow);
+
+                    if (selected == IntPtr.Zero)
+                    {
+                        Trace.WriteLine($"WindowMonitor: No manageable RDP fullscreen candidate among {candidates.Count} window(s).");
+                        return;
+                    }
+
+                    Trace.WriteLine($"WindowMonitor: Processing RDP fullscreen candidate {selected} from {candidates.Count} window(s).");
+                    _manager.MaximizeToDesktop(selected, isRdpFullscreen: true);
+                });
+            });
+        });
     }
 
     private async void OnMoveSizeEnd(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
@@ -153,27 +211,40 @@ internal sealed class WindowMonitor : IDisposable
 
         // If this window was pending maximize, handle it now
         bool wasPending = false;
+        FullscreenState pendingState = FullscreenState.None;
         if (!_syncControl.IsDisposed && _syncControl.IsHandleCreated)
         {
-            wasPending = (bool)_syncControl.Invoke(new Func<bool>(() => _pendingMaximize.Remove(hwnd)));
+            wasPending = (bool)_syncControl.Invoke(new Func<bool>(() =>
+            {
+                if (!_pendingMaximize.Remove(hwnd, out pendingState)) return false;
+                return true;
+            }));
         }
         if (wasPending)
         {
             Trace.WriteLine($"WindowMonitor: MoveSizeEnd triggered for pending maximize window {hwnd}.");
-            MarshalToUiThread(() => _manager.MaximizeToDesktop(hwnd));
+            MarshalToUiThread(() =>
+            {
+                if (GetFullscreenState(hwnd) != FullscreenState.None)
+                {
+                    _manager.MaximizeToDesktop(hwnd, pendingState == FullscreenState.RdpFullscreen);
+                }
+                else
+                {
+                    Trace.WriteLine($"WindowMonitor: MoveSizeEnd ignored pending window {hwnd} because it is no longer fullscreen.");
+                }
+            });
             return;
         }
 
         // Handle only tracked windows that are being restored (not maximized)
-        if (!_tracker.IsTracked(hwnd)) return;
-        var placement = NativeMethods.WINDOWPLACEMENT.Default;
-        if (!NativeMethods.GetWindowPlacement(hwnd, ref placement)) return;
-        Trace.WriteLine($"WindowMonitor: MoveSizeEnd: tracked window {hwnd} showCmd={placement.showCmd}.");
-        if (placement.showCmd != NativeMethods.SW_MAXIMIZE)
+        var trackedEntry = _tracker.Get(hwnd);
+        if (trackedEntry == null) return;
+        if (GetFullscreenState(hwnd) == FullscreenState.None)
         {
             Trace.WriteLine($"WindowMonitor: Tracked window {hwnd} un-maximized via move/size, restoring.");
-            await Task.Delay(100);
-            MarshalToUiThread(() => _manager.Restore(hwnd));
+            await Task.Delay(trackedEntry.IsRdpFullscreen ? RdpRestoreDelayMs : StandardRestoreDelayMs);
+            QueueRestore(hwnd, 0);
         }
     }
 
@@ -201,10 +272,52 @@ internal sealed class WindowMonitor : IDisposable
         }
     }
 
+    private void QueueRestore(IntPtr hwnd, int delayMs)
+    {
+        MarshalToUiThread(() =>
+        {
+            if (!_pendingRestore.Add(hwnd)) return;
+
+            _ = Task.Run(async () =>
+            {
+                if (delayMs > 0) await Task.Delay(delayMs);
+
+                MarshalToUiThread(() =>
+                {
+                    _pendingRestore.Remove(hwnd);
+
+                    var entry = _tracker.Get(hwnd);
+                    if (entry == null) return;
+                    if (GetFullscreenState(hwnd) != FullscreenState.None)
+                    {
+                        Trace.WriteLine($"WindowMonitor: Restore ignored for {hwnd} because it is fullscreen again.");
+                        return;
+                    }
+
+                    _manager.Restore(hwnd);
+                });
+            });
+        });
+    }
+
+    private static FullscreenState GetFullscreenState(IntPtr hwnd)
+    {
+        var placement = NativeMethods.WINDOWPLACEMENT.Default;
+        if (NativeMethods.GetWindowPlacement(hwnd, ref placement) && placement.showCmd == NativeMethods.SW_MAXIMIZE)
+        {
+            return FullscreenState.Maximized;
+        }
+
+        return IsRdpFullscreenTransition(hwnd)
+            ? FullscreenState.RdpFullscreen
+            : FullscreenState.None;
+    }
+
     private static bool IsRdpFullscreenTransition(IntPtr hwnd)
     {
         if (!IsRdpWindow(hwnd)) return false;
         if (!NativeMethods.GetWindowRect(hwnd, out var windowRect)) return false;
+        if (!IsBorderlessWindow(hwnd)) return false;
 
         var monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
         if (monitor == IntPtr.Zero) return false;
@@ -212,8 +325,7 @@ internal sealed class WindowMonitor : IDisposable
         var monitorInfo = NativeMethods.MONITORINFO.Default;
         if (!NativeMethods.GetMonitorInfo(monitor, ref monitorInfo)) return false;
 
-        return RectEquals(windowRect, monitorInfo.rcMonitor, RdpGeometryTolerance)
-            || RectEquals(windowRect, GetVirtualScreenRect(), RdpGeometryTolerance);
+        return IsRectFullscreen(windowRect, monitorInfo.rcMonitor, GetVirtualScreenRect());
     }
 
     private static bool IsRdpWindow(IntPtr hwnd)
@@ -234,6 +346,25 @@ internal sealed class WindowMonitor : IDisposable
         }
     }
 
+    private static bool IsBorderlessWindow(IntPtr hwnd)
+    {
+        NativeMethods.SetLastError(0);
+        long style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
+        if (style == 0 && Marshal.GetLastWin32Error() != 0) return false;
+
+        return (style & (NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME)) == 0;
+    }
+
+    private static bool IsForegroundWindowOrOwner(IntPtr hwnd)
+    {
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return false;
+        if (foreground == hwnd) return true;
+
+        return NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOTOWNER) == foreground
+            || NativeMethods.GetAncestor(foreground, NativeMethods.GA_ROOTOWNER) == hwnd;
+    }
+
     private static NativeMethods.RECT GetVirtualScreenRect()
     {
         int left = NativeMethods.GetSystemMetrics(NativeMethods.SM_XVIRTUALSCREEN);
@@ -249,7 +380,13 @@ internal sealed class WindowMonitor : IDisposable
         };
     }
 
-    private static bool RectEquals(NativeMethods.RECT a, NativeMethods.RECT b, int tolerance)
+    internal static bool IsRectFullscreen(NativeMethods.RECT windowRect, NativeMethods.RECT monitorRect, NativeMethods.RECT virtualScreenRect)
+    {
+        return RectEquals(windowRect, monitorRect, RdpGeometryTolerance)
+            || RectEquals(windowRect, virtualScreenRect, RdpGeometryTolerance);
+    }
+
+    internal static bool RectEquals(NativeMethods.RECT a, NativeMethods.RECT b, int tolerance)
     {
         return Math.Abs(a.Left - b.Left) <= tolerance
             && Math.Abs(a.Top - b.Top) <= tolerance

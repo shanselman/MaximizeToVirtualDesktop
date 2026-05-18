@@ -10,6 +10,7 @@ internal sealed record TrackingEntry(
     Guid TempDesktopId,
     IVirtualDesktop TempDesktop,
     string? ProcessName,
+    bool IsRdpFullscreen,
     NativeMethods.WINDOWPLACEMENT OriginalPlacement);
 
 /// <summary>
@@ -34,12 +35,13 @@ internal sealed class FullScreenTracker
 
     public void Track(IntPtr hwnd, Guid originalDesktopId, Guid tempDesktopId,
         IVirtualDesktop tempDesktop, string? processName,
+        bool isRdpFullscreen,
         NativeMethods.WINDOWPLACEMENT originalPlacement)
     {
         lock (_lock)
         {
             _entries[hwnd] = new TrackingEntry(hwnd, originalDesktopId, tempDesktopId,
-                tempDesktop, processName, originalPlacement);
+                tempDesktop, processName, isRdpFullscreen, originalPlacement);
             Trace.WriteLine($"FullScreenTracker: Now tracking {hwnd} (total: {_entries.Count})");
         }
         PersistToDisk();

@@ -72,10 +72,30 @@ internal static partial class NativeMethods
     [DllImport("user32.dll")]
     internal static extern int GetSystemMetrics(int nIndex);
 
+    internal static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex)
+    {
+        return IntPtr.Size == 8
+            ? GetWindowLongPtr64(hWnd, nIndex)
+            : new IntPtr(GetWindowLong32(hWnd, nIndex));
+    }
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
     [DllImport("user32.dll")]
     internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
     internal const uint GW_OWNER = 4;
+    internal const uint GA_ROOTOWNER = 3;
+    internal const int GWL_STYLE = -16;
+    internal const long WS_CAPTION = 0x00C00000L;
+    internal const long WS_THICKFRAME = 0x00040000L;
     internal const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
     internal const int SM_XVIRTUALSCREEN = 76;
     internal const int SM_YVIRTUALSCREEN = 77;
@@ -90,6 +110,9 @@ internal static partial class NativeMethods
 
     [DllImport("kernel32.dll")]
     internal static extern uint GetCurrentThreadId();
+
+    [DllImport("kernel32.dll")]
+    internal static extern void SetLastError(uint dwErrCode);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

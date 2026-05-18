@@ -28,40 +28,40 @@ internal sealed class FullScreenManager
     /// </summary>
     public void Toggle(IntPtr hwnd)
     {
-        if (!NativeMethods.IsWindow(hwnd))
+        RunWithInFlight(hwnd, () =>
         {
-            Trace.WriteLine($"FullScreenManager: hwnd {hwnd} is not a valid window, ignoring.");
-            return;
-        }
+            if (!NativeMethods.IsWindow(hwnd))
+            {
+                Trace.WriteLine($"FullScreenManager: hwnd {hwnd} is not a valid window, ignoring.");
+                return;
+            }
 
-        if (!_inFlight.Add(hwnd))
-        {
-            Trace.WriteLine($"FullScreenManager: hwnd {hwnd} already in-flight, ignoring.");
-            return;
-        }
-
-        try
-        {
             if (_tracker.IsTracked(hwnd))
             {
-                Restore(hwnd);
+                RestoreCore(hwnd);
             }
             else
             {
-                MaximizeToDesktop(hwnd);
+                MaximizeToDesktopCore(hwnd, isRdpFullscreen: false);
             }
-        }
-        finally
-        {
-            _inFlight.Remove(hwnd);
-        }
+        });
     }
 
     /// <summary>
     /// Send a window to a new virtual desktop, maximized.
     /// Only the clicked window is moved; other windows from the same process are not affected.
     /// </summary>
-    public void MaximizeToDesktop(IntPtr hwnd)
+    public void MaximizeToDesktop(IntPtr hwnd, bool isRdpFullscreen = false)
+    {
+        RunWithInFlight(hwnd, () => MaximizeToDesktopCore(hwnd, isRdpFullscreen));
+    }
+
+    public bool CanManageWindow(IntPtr hwnd)
+    {
+        return NativeMethods.IsWindow(hwnd) && _vds.GetDesktopIdForWindow(hwnd) != null;
+    }
+
+    private void MaximizeToDesktopCore(IntPtr hwnd, bool isRdpFullscreen)
     {
         if (!NativeMethods.IsWindow(hwnd))
         {
@@ -72,7 +72,7 @@ internal sealed class FullScreenManager
         if (_tracker.IsTracked(hwnd))
         {
             Trace.WriteLine($"FullScreenManager: hwnd {hwnd} already tracked, toggling to restore.");
-            Restore(hwnd);
+            RestoreCore(hwnd);
             return;
         }
 
@@ -182,22 +182,30 @@ internal sealed class FullScreenManager
         }
 
         // 7. Maximize the primary window — delay lets desktop switch animation finish first
-        bool elevated = NativeMethods.IsWindowElevated(hwnd);
-        if (elevated)
+        if (isRdpFullscreen)
         {
-            Trace.WriteLine("FullScreenManager: Window is elevated, cannot maximize via UIPI.");
-            NotificationOverlay.ShowNotification("⚠ Elevated Window",
-                "Press Win+↑ to maximize", hwnd);
+            Thread.Sleep(250);
+            Trace.WriteLine("FullScreenManager: Preserving RDP fullscreen geometry.");
         }
         else
         {
-            Thread.Sleep(250);
-            NativeMethods.ShowWindow(hwnd, NativeMethods.SW_MAXIMIZE);
+            bool elevated = NativeMethods.IsWindowElevated(hwnd);
+            if (elevated)
+            {
+                Trace.WriteLine("FullScreenManager: Window is elevated, cannot maximize via UIPI.");
+                NotificationOverlay.ShowNotification("⚠ Elevated Window",
+                    "Press Win+↑ to maximize", hwnd);
+            }
+            else
+            {
+                Thread.Sleep(250);
+                NativeMethods.ShowWindow(hwnd, NativeMethods.SW_MAXIMIZE);
+            }
         }
         NativeMethods.SetForegroundWindow(hwnd);
 
         // 8. Track the window
-        _tracker.Track(hwnd, originalDesktopId.Value, tempDesktopId.Value, tempDesktop, processName, originalPlacement);
+        _tracker.Track(hwnd, originalDesktopId.Value, tempDesktopId.Value, tempDesktop, processName, isRdpFullscreen, originalPlacement);
 
         NotificationOverlay.ShowNotification("→ Virtual Desktop", processName ?? "", hwnd);
         Trace.WriteLine($"FullScreenManager: Successfully moved window to desktop {tempDesktopId}");
@@ -208,6 +216,11 @@ internal sealed class FullScreenManager
     /// switch back, and remove the temp desktop.
     /// </summary>
     public void Restore(IntPtr hwnd)
+    {
+        RunWithInFlight(hwnd, () => RestoreCore(hwnd));
+    }
+
+    private void RestoreCore(IntPtr hwnd)
     {
         var entry = _tracker.Get(hwnd);
         if (entry == null)
@@ -224,12 +237,16 @@ internal sealed class FullScreenManager
         try
         {
             // Restore window placement
-            if (NativeMethods.IsWindow(hwnd))
+            if (NativeMethods.IsWindow(hwnd) && !entry.IsRdpFullscreen)
             {
                 var placement = entry.OriginalPlacement;
                 NativeMethods.SetWindowPlacement(hwnd, ref placement);
                 // Ensure the window is shown in its normal (not maximized) state
                 NativeMethods.ShowWindow(hwnd, (int)NativeMethods.SW_SHOWNORMAL);
+            }
+            else if (entry.IsRdpFullscreen)
+            {
+                Trace.WriteLine("FullScreenManager: Preserving RDP fullscreen placement during restore.");
             }
 
             // Move window back to original desktop
@@ -374,4 +391,21 @@ internal sealed class FullScreenManager
         }
     }
 
+    private void RunWithInFlight(IntPtr hwnd, Action action)
+    {
+        if (!_inFlight.Add(hwnd))
+        {
+            Trace.WriteLine($"FullScreenManager: hwnd {hwnd} already in-flight, ignoring.");
+            return;
+        }
+
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _inFlight.Remove(hwnd);
+        }
+    }
 }
