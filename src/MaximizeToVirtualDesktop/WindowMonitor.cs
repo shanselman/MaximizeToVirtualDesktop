@@ -11,6 +11,8 @@ namespace MaximizeToVirtualDesktop;
 /// </summary>
 internal sealed class WindowMonitor : IDisposable
 {
+    private const int RdpGeometryTolerance = 2;
+
     private readonly FullScreenManager _manager;
     private readonly FullScreenTracker _tracker;
     private readonly Control _syncControl;
@@ -210,13 +212,13 @@ internal sealed class WindowMonitor : IDisposable
         var monitorInfo = NativeMethods.MONITORINFO.Default;
         if (!NativeMethods.GetMonitorInfo(monitor, ref monitorInfo)) return false;
 
-        return RectEquals(windowRect, monitorInfo.rcMonitor, 2)
-            || RectEquals(windowRect, GetVirtualScreenRect(), 2);
+        return RectEquals(windowRect, monitorInfo.rcMonitor, RdpGeometryTolerance)
+            || RectEquals(windowRect, GetVirtualScreenRect(), RdpGeometryTolerance);
     }
 
     private static bool IsRdpWindow(IntPtr hwnd)
     {
-        NativeMethods.GetWindowThreadProcessId(hwnd, out int processId);
+        if (NativeMethods.GetWindowThreadProcessId(hwnd, out int processId) == 0) return false;
         if (processId <= 0) return false;
 
         try
@@ -225,8 +227,9 @@ internal sealed class WindowMonitor : IDisposable
             return process.ProcessName.Equals("mstsc", StringComparison.OrdinalIgnoreCase)
                 || process.ProcessName.Equals("msrdc", StringComparison.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.WriteLine($"WindowMonitor: Failed to inspect process for hwnd {hwnd}: {ex.Message}");
             return false;
         }
     }
