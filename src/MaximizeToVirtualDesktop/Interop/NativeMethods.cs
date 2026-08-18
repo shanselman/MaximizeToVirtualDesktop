@@ -49,6 +49,11 @@ internal static partial class NativeMethods
     internal static extern IntPtr WindowFromPoint(POINT point);
 
     [DllImport("user32.dll")]
+    internal static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    internal const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
@@ -68,6 +73,12 @@ internal static partial class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsIconic(IntPtr hWnd);
+
+    internal const int VK_LBUTTON = 0x01;
 
     [DllImport("kernel32.dll")]
     internal static extern uint GetCurrentThreadId();
@@ -182,7 +193,10 @@ internal static partial class NativeMethods
     internal const int SW_MAXIMIZE = 3;
     internal const int SW_RESTORE = 9;
     internal const int SW_MINIMIZE = 6;
+    internal const uint SW_HIDE = 0;
+    internal const uint SW_SHOWMINNOACTIVE = 7;
     internal const int SW_SHOWNOACTIVATE = 4;
+    internal const uint WPF_RESTORETOMAXIMIZED = 0x0002;
 
     internal const uint WM_HOTKEY = 0x0312;
     internal const uint WM_NCHITTEST = 0x0084;
@@ -209,6 +223,7 @@ internal static partial class NativeMethods
 
     internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     internal const uint EVENT_OBJECT_DESTROY = 0x8001;
+    internal const uint EVENT_OBJECT_HIDE = 0x8003;
     internal const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
     internal const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
 

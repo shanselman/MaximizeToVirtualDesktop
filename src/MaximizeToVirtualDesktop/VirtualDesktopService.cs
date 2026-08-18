@@ -197,27 +197,7 @@ internal sealed class VirtualDesktopService : IDisposable
     {
         try
         {
-            // Activate the taskbar to prevent flashing icons (from MScholtes)
-            var taskbarHwnd = NativeMethods.FindWindow("Shell_TrayWnd", null);
-            if (taskbarHwnd != IntPtr.Zero)
-            {
-                NativeMethods.GetWindowThreadProcessId(taskbarHwnd, out _);
-                var foregroundHwnd = NativeMethods.GetForegroundWindow();
-                uint desktopThreadId = NativeMethods.GetWindowThreadProcessId(taskbarHwnd, out _);
-                uint foregroundThreadId = NativeMethods.GetWindowThreadProcessId(foregroundHwnd, out _);
-                uint currentThreadId = NativeMethods.GetCurrentThreadId();
-
-                if (desktopThreadId != 0 && foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
-                {
-                    NativeMethods.AttachThreadInput(desktopThreadId, currentThreadId, true);
-                    NativeMethods.AttachThreadInput(foregroundThreadId, currentThreadId, true);
-                    NativeMethods.SetForegroundWindow(taskbarHwnd);
-                    NativeMethods.AttachThreadInput(foregroundThreadId, currentThreadId, false);
-                    NativeMethods.AttachThreadInput(desktopThreadId, currentThreadId, false);
-                }
-            }
-
-            _managerInternal!.SwitchDesktopWithAnimation(desktop);
+            _managerInternal!.SwitchDesktop(desktop);
 
             Trace.WriteLine($"VirtualDesktopService: Switched to desktop {desktop.GetId()}");
             return true;
